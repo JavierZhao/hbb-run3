@@ -1,0 +1,13 @@
+--2024-06-27 19:33:50--  http://voms-proxy-init/
+Resolving voms-proxy-init (voms-proxy-init)... failed: Name or service not known.
+wget: unable to resolve host address ‘voms-proxy-init’
+--2024-06-27 19:33:50--  http://cms/
+Resolving cms (cms)... 131.225.105.28
+Connecting to cms (cms)|131.225.105.28|:80... connected.
+HTTP request sent, awaiting response... 302 Moved Temporarily
+Location: https://cms/ [following]
+--2024-06-27 19:33:50--  https://cms/
+Connecting to cms (cms)|131.225.105.28|:443... connected.
+ERROR: no certificate subject alternative name matches
+	requested host name ‘cms’.
+To connect to cms insecurely, use `--no-check-certificate'.
