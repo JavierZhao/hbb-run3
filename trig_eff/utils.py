@@ -32,9 +32,9 @@ import json
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-def plot_1d_trigger_efficiencies(trig_name, prod_mode, output, triggers_set, trig_vars, max_triggers_per_plot=5):
+def plot_1d_trigger_efficiencies(trig_name, prod_mode, output, triggers_set, trig_vars, baseline_key, max_triggers_per_plot=5):
     # Create the directory to save figures
-    save_dir = f"/srv/figures/VBF_baseline/{prod_mode}/1d_trigger_efficiencies"
+    save_dir = f"/srv/figures/{baseline_key}_baseline/{prod_mode}/1d_trigger_efficiencies"
     os.makedirs(save_dir, exist_ok=True)
 
     # Function to chunk the triggers_set
@@ -111,7 +111,94 @@ def plot_1d_trigger_efficiencies(trig_name, prod_mode, output, triggers_set, tri
         plt.show()
         plt.close(fig)
 
-def plot_2d_trigger_efficiencies(trig_name, prod_mode, output, triggers_set, trig_vars, max_triggers_per_plot=5):
+
+def plot_1d_trigger_efficiencies_improvement(trig_name, prod_mode, output, triggers_set, trig_vars, baseline_key, max_triggers_per_plot=5):
+    """
+    Plot the improvement in trigger efficiency after adding a logical OR with one of the VBF triggers, e.g.   QuadPFJet111_90_80_15_DoublePFBTagDeepCSV_1p3_7p7_VBF1
+    """
+    # Create the directory to save figures
+    save_dir = f"/srv/figures/{baseline_key}_baseline/{prod_mode}/1d_trigger_efficiencies_improvement"
+    os.makedirs(save_dir, exist_ok=True)
+
+    # Function to chunk the triggers_set
+    def chunk_triggers(triggers, chunk_size):
+        for i in range(0, len(triggers), chunk_size):
+            yield triggers[i:i + chunk_size]
+
+    # Define colors for plotting
+    colors = ['blue', 'green', 'red', 'purple', 'orange', 'cyan', 'magenta', 'yellow', 'black', 'brown']
+
+    # Chunk the triggers_set into parts of size max_triggers_per_plot
+    trigger_chunks = list(chunk_triggers(triggers_set, max_triggers_per_plot))
+
+    # Loop over each chunk of triggers
+    for chunk_index, trigger_chunk in enumerate(trigger_chunks):
+        num_vars = len(trig_vars)
+        # Calculate the number of rows and columns
+        nrows = 2
+        ncols = (num_vars + 1) // 2  # Ensure all variables are covered
+        fig_width = 8 * ncols  # Increase width per subplot
+        fig_height = 6 * nrows  # Increase height per subplot
+        fig, axs = plt.subplots(nrows, ncols, figsize=(fig_width, fig_height), squeeze=False)
+
+        # Flatten axs array for easy indexing
+        axs = axs.flatten()
+
+        # Loop over variables to create subplots
+        for var_idx, var_name in enumerate(trig_vars.keys()):
+            ax = axs[var_idx]
+
+            # Prepare bin edges for the variable
+            bin_edges = trig_vars[var_name]['axis'].edges
+
+            # Loop over triggers to plot efficiencies
+            for i, trigger in enumerate(trigger_chunk):
+                # Retrieve per-event data
+                total_values = np.array(output[trigger][var_name]['total'])
+                pass_values = np.array(output[trigger][var_name]['pass'])
+                pass_or_values = np.array(output[trigger][var_name]['pass_or'])
+
+                # Create histograms from per-event data
+                total_hist, _ = np.histogram(total_values, bins=bin_edges)
+                pass_hist, _ = np.histogram(pass_values, bins=bin_edges)
+                pass_or_hist, _ = np.histogram(pass_or_values, bins=bin_edges)
+
+                # Compute efficiency
+                with np.errstate(divide='ignore', invalid='ignore'):
+                    efficiency = np.nan_to_num(pass_hist / total_hist, nan=0.0, posinf=0.0, neginf=0.0)
+                    efficiency_or = np.nan_to_num(pass_or_hist / total_hist, nan=0.0, posinf=0.0, neginf=0.0)
+
+                # Compute bin centers for plotting
+                bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+
+                # Plot efficiency
+                ax.step(bin_centers, efficiency, where='mid', label=f'{trigger}', color=colors[i % len(colors)], linewidth=2)
+                ax.step(bin_centers, efficiency_or, where='mid', label=f'{trigger} or vbf trigger', color=colors[(i+1) % len(colors)], linewidth=2)
+
+            # Set axis labels and title with smaller font size
+            ax.set_xlabel(trig_vars[var_name]['label'], fontsize=12)
+            ax.set_ylabel('Efficiency', fontsize=12)
+            ax.set_ylim(0, 1)
+            ax.grid(True)
+            ax.tick_params(axis='both', which='major', labelsize=10)
+
+        # Hide any unused subplots
+        for idx in range(len(trig_vars), len(axs)):
+            fig.delaxes(axs[idx])
+
+        # Place a shared legend outside the plots on the right side
+        handles, labels = axs[0].get_legend_handles_labels()
+        fig.legend(handles, labels, title='Triggers', loc='upper left', bbox_to_anchor=(1.05, 1), borderaxespad=0., fontsize=12)
+
+        # Adjust layout to accommodate legends outside of plots
+        plt.tight_layout(rect=[0, 0, 0.95, 1])
+
+        # Save and show the figure
+        plt.savefig(f"{save_dir}/{trig_name}_TriggerEfficiencies_Set{chunk_index + 1}.png", dpi=200, bbox_inches='tight')
+        plt.show()
+        plt.close(fig)
+
+def plot_2d_trigger_efficiencies(trig_name, prod_mode, output, triggers_set, baseline_key, trig_vars, max_triggers_per_plot=5):
     # Create the directory to save figures
     save_dir = f"/srv/figures/{prod_mode}/2d_trigger_efficiencies"
     os.makedirs(save_dir, exist_ok=True)
@@ -191,9 +278,9 @@ def plot_2d_trigger_efficiencies(trig_name, prod_mode, output, triggers_set, tri
             plt.show()
             plt.close(fig)
 
-def plot_fancy_2d_trigger_efficiencies(trig_name, prod_mode, output, triggers_set, trig_vars, max_triggers_per_plot=5):
+def plot_fancy_2d_trigger_efficiencies(trig_name, prod_mode, output, triggers_set, trig_vars, baseline_key, max_triggers_per_plot=5):
     # Create the directory to save figures
-    save_dir = f"/srv/figures/VBF_baseline/{prod_mode}/fancy_2d_trigger_efficiencies"
+    save_dir = f"/srv/figures/{baseline_key}_baseline/{prod_mode}/fancy_2d_trigger_efficiencies"
     os.makedirs(save_dir, exist_ok=True)
 
     # Function to chunk the triggers_set
@@ -327,9 +414,9 @@ def plot_fancy_2d_trigger_efficiencies(trig_name, prod_mode, output, triggers_se
                 # Save figure as a JPG file
                 fig.write_image(f"{new_save_dir}/{trigger}.jpg")
 
-def compare_trigger_efficiencies(outputs, triggers_dict, trig_vars):
+def compare_trigger_efficiencies(outputs, triggers_dict, trig_vars, baseline_key):
     # Create a directory to save figures
-    save_dir = "./figures/VBF_baseline/trigger_efficiency_comparisons"
+    save_dir = f"./figures/{baseline_key}_baseline/trigger_efficiency_comparisons"
     os.makedirs(save_dir, exist_ok=True)
     
     # Define colors for plotting
@@ -396,13 +483,10 @@ def compare_trigger_efficiencies(outputs, triggers_dict, trig_vars):
                 plt.savefig(f"{save_dir}/{filename}", dpi=200)
                 plt.show()
                 plt.close()
-
-import os
-import matplotlib.pyplot as plt
-
 def plot_cutflow(output, save_dir, small_font_size=12):
     """
-    Creates and saves a cutflow diagram from the provided output dictionary.
+    Creates and saves a cutflow diagram from the provided output dictionary,
+    displaying the number of events passing each selection step on top of the bars.
 
     Parameters:
     output (list): A list containing dictionaries, where the first dictionary should have a 'cutflow' key.
@@ -415,14 +499,18 @@ def plot_cutflow(output, save_dir, small_font_size=12):
     # Print the cutflow
     for cut, count in cutflow.items():
         print(f"{cut}: {count}")
-    
+
     # Prepare data
     cuts = list(cutflow.keys())
     counts = [cutflow[cut] for cut in cuts]
 
     # Plot
     plt.figure(figsize=(10, 6))
-    plt.bar(cuts, counts, color='skyblue')
+    plt.yscale("log")
+    bars = plt.bar(cuts, counts, color='skyblue')
+
+    # Add counts on top of each bar using bar_label (Matplotlib ≥ 3.4)
+    plt.bar_label(bars, labels=[str(count) for count in counts], padding=3, fontsize=small_font_size)
 
     # Set smaller font sizes for labels and title
     plt.xlabel('Selection Steps', fontsize=small_font_size)
@@ -442,6 +530,7 @@ def plot_cutflow(output, save_dir, small_font_size=12):
     # Save the plot
     plt.savefig(os.path.join(save_dir, "cutFlow.png"), bbox_inches='tight', dpi=300)
     plt.show()
+    plt.close()
 
 # Example usage:
 # plot_cutflow(output, "/srv/figures/VBF_baseline/cutFlow/")
