@@ -515,5 +515,4 @@ class GeneralBaselineCutFlowProcessor(processor.ProcessorABC):
 
     def postprocess(self, accumulator):
         # No postprocessing required in this case
-        return accumulator required in this case
         return accumulator

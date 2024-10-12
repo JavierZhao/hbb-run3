@@ -112,7 +112,7 @@ def plot_1d_trigger_efficiencies(trig_name, prod_mode, output, triggers_set, tri
         plt.close(fig)
 
 
-def plot_1d_trigger_efficiencies_improvement(trig_name, prod_mode, output, triggers_set, trig_vars, baseline_key, max_triggers_per_plot=5):
+def plot_1d_trigger_efficiencies_improvement(trig_name, prod_mode, output, triggers_set, trig_vars, baseline_key, or_trig_name, max_triggers_per_plot=1):
     """
     Plot the improvement in trigger efficiency after adding a logical OR with one of the VBF triggers, e.g.   QuadPFJet111_90_80_15_DoublePFBTagDeepCSV_1p3_7p7_VBF1
     """
@@ -173,7 +173,7 @@ def plot_1d_trigger_efficiencies_improvement(trig_name, prod_mode, output, trigg
 
                 # Plot efficiency
                 ax.step(bin_centers, efficiency, where='mid', label=f'{trigger}', color=colors[i % len(colors)], linewidth=2)
-                ax.step(bin_centers, efficiency_or, where='mid', label=f'{trigger} or vbf trigger', color=colors[(i+1) % len(colors)], linewidth=2)
+                ax.step(bin_centers, efficiency_or, where='mid', label=f'{trigger} or {or_trig_name}', color=colors[(i+1) % len(colors)], linewidth=2)
 
             # Set axis labels and title with smaller font size
             ax.set_xlabel(trig_vars[var_name]['label'], fontsize=12)
@@ -194,7 +194,7 @@ def plot_1d_trigger_efficiencies_improvement(trig_name, prod_mode, output, trigg
         plt.tight_layout(rect=[0, 0, 0.95, 1])
 
         # Save and show the figure
-        plt.savefig(f"{save_dir}/{trig_name}_TriggerEfficiencies_Set{chunk_index + 1}.png", dpi=200, bbox_inches='tight')
+        plt.savefig(f"{save_dir}/{trigger}_or_{or_trig_name}.png", dpi=200, bbox_inches='tight')
         plt.show()
         plt.close(fig)
 
