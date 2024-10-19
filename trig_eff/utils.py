@@ -535,3 +535,95 @@ def plot_cutflow(output, save_dir, small_font_size=12):
 # Example usage:
 # plot_cutflow(output, "/srv/figures/VBF_baseline/cutFlow/")
 
+def plot_1d_trigger_soup(output, trig_vars, tags=[], save_dir=None):
+    """
+    Plot the trigger efficiencies for each cumulative trigger combination.
+
+    Parameters:
+    - output: dict
+        The output dictionary from the TriggerEfficiencyImprovementProcessor.
+    - trig_vars: dict
+        Dictionary of trigger variables with their processing functions and axis information.
+    - save_dir: str, optional
+        Directory to save the figures. If None, defaults to "./figures".
+    """
+    if save_dir is None:
+        save_dir = "./figures"
+    os.makedirs(save_dir, exist_ok=True)
+
+    # Define colors for plotting
+    colors = ['blue', 'green', 'red', 'purple', 'orange', 'cyan', 'magenta', 'yellow', 'black', 'brown']
+
+    # Extract the combinations from the output
+    combinations = list(output.keys())
+
+    num_vars = len(trig_vars)
+    ncols = 2
+    nrows = (num_vars + 1) // 2
+    fig_width = 8 * ncols
+    fig_height = 6 * nrows
+    fig, axs = plt.subplots(nrows, ncols, figsize=(fig_width, fig_height), squeeze=False)
+    axs = axs.flatten()
+
+    for var_idx, var_name in enumerate(trig_vars.keys()):
+        ax = axs[var_idx]
+        # Prepare bin edges for the variable
+        bin_edges = trig_vars[var_name]['axis'].edges
+
+        for i, combination in enumerate(combinations):
+            # Retrieve per-event data
+            total_values = np.array(output[combination][var_name]['total'])
+            pass_values = np.array(output[combination][var_name]['pass'])
+
+            # Create histograms from per-event data
+            total_hist, _ = np.histogram(total_values, bins=bin_edges)
+            pass_hist, _ = np.histogram(pass_values, bins=bin_edges)
+
+            # Compute efficiency
+            with np.errstate(divide='ignore', invalid='ignore'):
+                efficiency = np.nan_to_num(pass_hist / total_hist, nan=0.0, posinf=0.0, neginf=0.0)
+
+            # Compute bin centers for plotting
+            bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+
+            # Plot efficiency
+            ax.step(
+                bin_centers,
+                efficiency,
+                where='mid',
+                label=f'{combination}',
+                color=colors[i % len(colors)],
+                linewidth=2
+            )
+
+        # Set axis labels and title
+        ax.set_xlabel(trig_vars[var_name]['label'], fontsize=12)
+        ax.set_ylabel('Efficiency', fontsize=12)
+        ax.set_ylim(0, 1)
+        ax.grid(True)
+        ax.tick_params(axis='both', which='major', labelsize=10)
+
+    # Hide any unused subplots
+    for idx in range(len(trig_vars), len(axs)):
+        fig.delaxes(axs[idx])
+
+    # Place a shared legend outside the plots on the right side
+    handles, labels = axs[0].get_legend_handles_labels()
+    fig.legend(
+        handles,
+        tags,
+        title='Trigger Combinations',
+        loc='upper left',
+        bbox_to_anchor=(1.05, 1),
+        borderaxespad=0.,
+        fontsize=12
+    )
+
+    # Adjust layout to accommodate legends outside of plots
+    plt.tight_layout(rect=[0, 0, 0.95, 1])
+
+    # Save and show the figure
+    plt.savefig(f"{save_dir}/trigger_soup.png", dpi=200, bbox_inches='tight')
+    plt.show()
+    plt.close(fig)
+

@@ -516,3 +516,88 @@ class GeneralBaselineCutFlowProcessor(processor.ProcessorABC):
     def postprocess(self, accumulator):
         # No postprocessing required in this case
         return accumulator
+
+class TriggerSoupProcessor(processor.ProcessorABC):
+    """
+    Calculate the improvement in trigger efficiency after adding triggers from triggers_to_add to the initial_soup.
+    """
+    def __init__(self, initial_soup, triggers_to_add, trig_vars, baseline_key='VBF'):
+        self.initial_soup = initial_soup
+        self.triggers_to_add = triggers_to_add
+        self.trig_vars = trig_vars
+        self.baseline_key = baseline_key
+
+        # Generate cumulative trigger combinations
+        self.trigger_combinations = []
+        cumulative_triggers = list(self.initial_soup)
+        self.trigger_combinations.append(list(cumulative_triggers))
+        for trigger in self.triggers_to_add:
+            cumulative_triggers.append(trigger)
+            self.trigger_combinations.append(list(cumulative_triggers))
+        print(f"trigger_combinations: {self.trigger_combinations}")
+
+        # Initialize output using accumulators
+        self.output = dict_accumulator({
+            'Combination_{}'.format(i): dict_accumulator({
+                var_name: dict_accumulator({
+                    'total': list_accumulator(),
+                    'pass': list_accumulator(),
+                }) for var_name in trig_vars
+            }) for i in range(len(self.trigger_combinations))
+        })
+
+    def process(self, events):
+        output = self.output
+
+        baseline = create_baseline_selection_mask(events, tag=self.baseline_key)
+
+        # Compute variables using 'proc' functions from 'trig_vars'
+        variables = {}
+        for var_name, var_info in self.trig_vars.items():
+            var_array = var_info['proc'](events)
+            variables[var_name] = var_array
+
+        # Create a valid mask where all variables are not NaN
+        valid_vars_mask = np.ones(len(events), dtype=bool)
+        for var_array in variables.values():
+            valid_vars_mask &= ~np.isnan(ak.to_numpy(var_array))
+
+        # Combined selections
+        selection_total = baseline & valid_vars_mask
+
+        # Loop through each trigger combination
+        for idx, triggers in enumerate(self.trigger_combinations):
+            # Create the trigger mask for this combination
+            trigger_masks = [events.HLT[trig] for trig in triggers]
+            combined_trigger_mask = ak.zeros_like(events.HLT[triggers[0]], dtype=bool)
+            for mask in trigger_masks:
+                combined_trigger_mask = combined_trigger_mask | mask
+
+            # Selection for passing events
+            selection_pass = baseline & combined_trigger_mask & valid_vars_mask
+
+            # Collect per-event data for all variables
+            for var_name in self.trig_vars:
+                var_array = variables[var_name]
+
+                var_total = var_array[selection_total]
+                var_pass = var_array[selection_pass]
+
+                # Append to accumulators
+                key = 'Combination_{}'.format(idx)
+                output[key][var_name]['total'].extend(ak.to_numpy(var_total).tolist())
+                output[key][var_name]['pass'].extend(ak.to_numpy(var_pass).tolist())
+
+        return output
+
+
+    def postprocess(self, accumulator):
+        # Concatenate lists in the accumulator
+        for key in accumulator:
+            for var_name in accumulator[key]:
+                accumulator[key][var_name]['total'] = np.array(accumulator[key][var_name]['total'])
+                accumulator[key][var_name]['pass'] = np.array(accumulator[key][var_name]['pass'])
+        return accumulator
+
+
+
