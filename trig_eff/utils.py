@@ -535,7 +535,7 @@ def plot_cutflow(output, save_dir, small_font_size=12):
 # Example usage:
 # plot_cutflow(output, "/srv/figures/VBF_baseline/cutFlow/")
 
-def plot_1d_trigger_soup(output, trig_vars, tags=[], save_dir=None):
+def plot_1d_trigger_soup_compact(output, trig_vars, tags=[], save_dir=None):
     """
     Plot the trigger efficiencies for each cumulative trigger combination.
 
@@ -626,4 +626,131 @@ def plot_1d_trigger_soup(output, trig_vars, tags=[], save_dir=None):
     plt.savefig(f"{save_dir}/trigger_soup.png", dpi=200, bbox_inches='tight')
     plt.show()
     plt.close(fig)
+
+def plot_1d_trigger_soup_cms(output, trig_vars, tags=[], save_dir=None):
+    """
+    Plot the trigger efficiencies for each cumulative trigger combination.
+
+    Parameters:
+    - output: dict
+        The output dictionary from the TriggerEfficiencyImprovementProcessor.
+    - trig_vars: dict
+        Dictionary of trigger variables with their processing functions and axis information.
+    - tags: list
+        List of labels for the trigger combinations.
+    - save_dir: str, optional
+        Directory to save the figures. If None, defaults to "./figures".
+    """
+    if save_dir is None:
+        save_dir = "./figures"
+    os.makedirs(save_dir, exist_ok=True)
+
+    # Update font size for plots
+    plt.rcParams.update({"font.size": 14})
+
+    # Define colors for plotting
+    colors = plt.cm.tab10.colors
+
+    # Extract the combinations from the output
+    combinations = list(output.keys())
+
+    for var_name in trig_vars.keys():
+        # Prepare bin edges for the variable
+        bin_edges = trig_vars[var_name]['axis'].edges
+
+        # Create figure with two subplots
+        fig, (ax, rax) = plt.subplots(
+            2, 1, figsize=(12, 14),
+            gridspec_kw=dict(height_ratios=[4, 1], hspace=0.07),
+            sharex=True
+        )
+
+        # Initialize histograms and efficiencies dictionaries
+        hists = {}
+        ratios = {}
+        total_efficiencies = {}
+
+        # Assuming the total (denominator) is the same for all combinations
+        # Use the first combination as the 'All' data
+        first_combination = combinations[0]
+        total_values = np.array(output[first_combination][var_name]['total'])
+        weights_total = np.ones_like(total_values)  # Modify if you have actual weights
+
+        # 'All' histogram
+        hists['All'], _ = np.histogram(total_values, bins=bin_edges, weights=weights_total)
+
+        # Plot 'All' histogram
+        hep.histplot(
+            hists['All'],
+            bins=bin_edges,
+            yerr=False,
+            label='All',
+            ax=ax,
+            color='black',
+        )
+
+        max_efficiency = 0.0  # Initialize maximum efficiency
+
+        # Now loop over combinations to plot each trigger's data and ratio
+        for i, combination in enumerate(combinations):
+            pass_values = np.array(output[combination][var_name]['pass'])
+            weights_pass = np.ones_like(pass_values)  # Modify if you have actual weights
+
+            hists[combination], _ = np.histogram(pass_values, bins=bin_edges, weights=weights_pass)
+            ratios[combination] = np.divide(
+                hists[combination], hists['All'],
+                out=np.zeros_like(hists[combination], dtype=float),
+                where=hists['All'] != 0
+            )
+
+            # Plot histogram for this combination
+            hep.histplot(
+                hists[combination],
+                bins=bin_edges,
+                yerr=False,
+                label=tags[i] if tags else combination,
+                ax=ax,
+                color=colors[i % len(colors)],
+            )
+
+            # Plot ratio
+            hep.histplot(
+                (ratios[combination], bin_edges),
+                yerr=False,
+                label=tags[i] if tags else combination,
+                ax=rax,
+                histtype='errorbar',
+                color=colors[i % len(colors)],
+                capsize=4,
+            )
+
+            # Compute total efficiency for this combination
+            total_events = np.sum(hists['All'])
+            passed_events = np.sum(hists[combination])
+            total_efficiency = passed_events / total_events if total_events > 0 else 0.0
+            total_efficiencies[combination] = total_efficiency
+
+            # Update maximum efficiency
+            if total_efficiency > max_efficiency:
+                max_efficiency = total_efficiency
+
+        # Set labels and titles
+        title = f" (Max Efficiency: {max_efficiency:.2%})"
+        ax.set_title(title)
+
+        ax.set_ylabel("Events [A.U.]")
+        ax.legend()
+
+        rax.legend()
+        rax.grid(axis='y')
+        rax.set_xlabel(trig_vars[var_name]['label'])
+        rax.set_ylabel("Triggered / All")
+
+        # Add CMS label (modify according to your style)
+        hep.cms.label(ax=ax, data=False, year=2022, com="13.6 TeV")
+
+        # Save and show the figure
+        plt.savefig(f"{save_dir}/{var_name}_trigger_soup.png", dpi=200, bbox_inches='tight')
+        plt.show()
+        plt.close(fig)
 
