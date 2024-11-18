@@ -627,7 +627,7 @@ def plot_1d_trigger_soup_compact(output, trig_vars, tags=[], save_dir=None):
     plt.show()
     plt.close(fig)
 
-def plot_1d_trigger_soup_cms(output, trig_vars, tags=[], save_dir=None):
+def plot_1d_trigger_soup_cms(output, trig_vars, tags=[], save_dir=None, year=2022):
     """
     Plot the trigger efficiencies for each cumulative trigger combination.
 
@@ -747,7 +747,7 @@ def plot_1d_trigger_soup_cms(output, trig_vars, tags=[], save_dir=None):
         rax.set_ylabel("Triggered / All")
 
         # Add CMS label (modify according to your style)
-        hep.cms.label(ax=ax, data=False, year=2022, com="13.6 TeV")
+        hep.cms.label(ax=ax, data=False, year=year, com="13.6 TeV")
 
         # Save and show the figure
         plt.savefig(f"{save_dir}/{var_name}_trigger_soup.png", dpi=200, bbox_inches='tight')
