@@ -519,31 +519,44 @@ class GeneralBaselineCutFlowProcessor(processor.ProcessorABC):
 
 class TriggerSoupProcessor(processor.ProcessorABC):
     """
-    Calculate the improvement in trigger efficiency after adding triggers from triggers_to_add to the initial_soup.
+    Calculate the trigger efficiency of the soup without each trigger in the soup.
     """
-    def __init__(self, initial_soup, triggers_to_add, trig_vars, baseline_key='VBF'):
-        self.initial_soup = initial_soup
-        self.triggers_to_add = triggers_to_add
+    def __init__(self, trig_soup, trig_vars, baseline_key='VBF'):
+        self.trig_soup = trig_soup
         self.trig_vars = trig_vars
         self.baseline_key = baseline_key
 
-        # Generate cumulative trigger combinations
+        # Generate trigger combinations
         self.trigger_combinations = []
-        cumulative_triggers = list(self.initial_soup)
-        self.trigger_combinations.append(list(cumulative_triggers))
-        for trigger in self.triggers_to_add:
-            cumulative_triggers.append(trigger)
-            self.trigger_combinations.append(list(cumulative_triggers))
-        print(f"trigger_combinations: {self.trigger_combinations}")
+
+        # All triggers (no triggers omitted)
+        self.trigger_combinations.append(list(self.trig_soup))
+# 
+        # Now, for each trigger, create a combination without that trigger
+        for idx, trig in enumerate(self.trig_soup):
+            triggers_without_current = self.trig_soup[:idx] + self.trig_soup[idx+1:]
+            self.trigger_combinations.append(triggers_without_current)
+
+        # Create combination names
+        self.combination_names = ['All_triggers'] + ['Without_{}'.format(trig) for trig in self.trig_soup]
+
+        # Print trigger combinations for debugging
+        print(f"Trigger combinations: {list(zip(self.combination_names, self.trigger_combinations))}")
 
         # Initialize output using accumulators
+        # Add 'Baseline' key to store 'total' arrays
         self.output = dict_accumulator({
-            'Combination_{}'.format(i): dict_accumulator({
-                var_name: dict_accumulator({
-                    'total': list_accumulator(),
-                    'pass': list_accumulator(),
-                }) for var_name in trig_vars
-            }) for i in range(len(self.trigger_combinations))
+            'Baseline': dict_accumulator({
+                var_name: list_accumulator()
+                for var_name in trig_vars
+            }),
+            **{
+                name: dict_accumulator({
+                    var_name: dict_accumulator({
+                        'pass': list_accumulator(),
+                    }) for var_name in trig_vars
+                }) for name in self.combination_names
+            }
         })
 
     def process(self, events):
@@ -562,16 +575,26 @@ class TriggerSoupProcessor(processor.ProcessorABC):
         for var_array in variables.values():
             valid_vars_mask &= ~np.isnan(ak.to_numpy(var_array))
 
-        # Combined selections
+        # Combined selection for total (baseline without triggers)
         selection_total = baseline & valid_vars_mask
 
+        # Collect 'total' arrays under 'Baseline' key
+        for var_name in self.trig_vars:
+            var_array = variables[var_name]
+            var_total = var_array[selection_total]
+            output['Baseline'][var_name].extend(ak.to_numpy(var_total).tolist())
+
         # Loop through each trigger combination
-        for idx, triggers in enumerate(self.trigger_combinations):
+        for name, triggers in zip(self.combination_names, self.trigger_combinations):
             # Create the trigger mask for this combination
-            trigger_masks = [events.HLT[trig] for trig in triggers]
-            combined_trigger_mask = ak.zeros_like(events.HLT[triggers[0]], dtype=bool)
-            for mask in trigger_masks:
-                combined_trigger_mask = combined_trigger_mask | mask
+            if triggers:
+                trigger_masks = [events.HLT[trig] for trig in triggers]
+                combined_trigger_mask = ak.zeros_like(events.HLT[triggers[0]], dtype=bool)
+                for mask in trigger_masks:
+                    combined_trigger_mask = combined_trigger_mask | mask
+            else:
+                # If triggers is empty, combined mask is all False
+                combined_trigger_mask = ak.zeros_like(events.HLT[self.trig_soup[0]], dtype=bool)
 
             # Selection for passing events
             selection_pass = baseline & combined_trigger_mask & valid_vars_mask
@@ -580,24 +603,25 @@ class TriggerSoupProcessor(processor.ProcessorABC):
             for var_name in self.trig_vars:
                 var_array = variables[var_name]
 
-                var_total = var_array[selection_total]
                 var_pass = var_array[selection_pass]
 
                 # Append to accumulators
-                key = 'Combination_{}'.format(idx)
-                output[key][var_name]['total'].extend(ak.to_numpy(var_total).tolist())
-                output[key][var_name]['pass'].extend(ak.to_numpy(var_pass).tolist())
+                output[name][var_name]['pass'].extend(ak.to_numpy(var_pass).tolist())
+
+        # print(f"Baseline mask (total events: {len(baseline)}): {np.sum(baseline)} events pass baseline selection")
+        # for trig in triggers:
+        #     print(f"Trigger: {trig}, Events passing: {np.sum(events.HLT[trig])}")
+        # print(f"Combined trigger mask (name: {name}, total events: {len(combined_trigger_mask)}): {np.sum(combined_trigger_mask)} events pass")
 
         return output
-
 
     def postprocess(self, accumulator):
         # Concatenate lists in the accumulator
         for key in accumulator:
-            for var_name in accumulator[key]:
-                accumulator[key][var_name]['total'] = np.array(accumulator[key][var_name]['total'])
-                accumulator[key][var_name]['pass'] = np.array(accumulator[key][var_name]['pass'])
+            if key == 'Baseline':
+                for var_name in accumulator[key]:
+                    accumulator[key][var_name] = np.array(accumulator[key][var_name])
+            else:
+                for var_name in accumulator[key]:
+                    accumulator[key][var_name]['pass'] = np.array(accumulator[key][var_name]['pass'])
         return accumulator
-
-
-

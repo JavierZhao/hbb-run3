@@ -627,20 +627,25 @@ def plot_1d_trigger_soup_compact(output, trig_vars, tags=[], save_dir=None):
     plt.show()
     plt.close(fig)
 
-def plot_1d_trigger_soup_cms(output, trig_vars, tags=[], save_dir=None, year=2022):
+def plot_1d_trigger_soup_cms(output, trig_vars, save_dir=None, year=2022):
     """
-    Plot the trigger efficiencies for each cumulative trigger combination.
+    Plot the trigger efficiencies for each trigger combination.
 
     Parameters:
     - output: dict
-        The output dictionary from the TriggerEfficiencyImprovementProcessor.
+        The output dictionary from the TriggerSoupProcessor.
     - trig_vars: dict
         Dictionary of trigger variables with their processing functions and axis information.
-    - tags: list
-        List of labels for the trigger combinations.
     - save_dir: str, optional
         Directory to save the figures. If None, defaults to "./figures".
+    - year: int, optional
+        Year label for the plots.
     """
+    import os
+    import numpy as np
+    import matplotlib.pyplot as plt
+    import mplhep as hep
+
     if save_dir is None:
         save_dir = "./figures"
     os.makedirs(save_dir, exist_ok=True)
@@ -651,8 +656,8 @@ def plot_1d_trigger_soup_cms(output, trig_vars, tags=[], save_dir=None, year=202
     # Define colors for plotting
     colors = plt.cm.tab10.colors
 
-    # Extract the combinations from the output
-    combinations = list(output.keys())
+    # Extract the combination names from the output, excluding 'Baseline'
+    combination_names = [key for key in output.keys() if key != 'Baseline']
 
     for var_name in trig_vars.keys():
         # Prepare bin edges for the variable
@@ -670,29 +675,29 @@ def plot_1d_trigger_soup_cms(output, trig_vars, tags=[], save_dir=None, year=202
         ratios = {}
         total_efficiencies = {}
 
-        # Assuming the total (denominator) is the same for all combinations
-        # Use the first combination as the 'All' data
-        first_combination = combinations[0]
-        total_values = np.array(output[first_combination][var_name]['total'])
+        # Get 'total' values from 'Baseline'
+        total_values = np.array(output['Baseline'][var_name])
         weights_total = np.ones_like(total_values)  # Modify if you have actual weights
 
-        # 'All' histogram
+        # 'All' histogram (denominator for efficiency)
         hists['All'], _ = np.histogram(total_values, bins=bin_edges, weights=weights_total)
 
-        # Plot 'All' histogram
+        # Plot 'Baseline' histogram
         hep.histplot(
             hists['All'],
             bins=bin_edges,
             yerr=False,
-            label='All',
+            label='Baseline',
             ax=ax,
             color='black',
+            linestyle='dashed',
+            linewidth=2
         )
 
         max_efficiency = 0.0  # Initialize maximum efficiency
 
         # Now loop over combinations to plot each trigger's data and ratio
-        for i, combination in enumerate(combinations):
+        for i, combination in enumerate(combination_names):
             pass_values = np.array(output[combination][var_name]['pass'])
             weights_pass = np.ones_like(pass_values)  # Modify if you have actual weights
 
@@ -704,25 +709,50 @@ def plot_1d_trigger_soup_cms(output, trig_vars, tags=[], save_dir=None, year=202
             )
 
             # Plot histogram for this combination
-            hep.histplot(
-                hists[combination],
-                bins=bin_edges,
-                yerr=False,
-                label=tags[i] if tags else combination,
-                ax=ax,
-                color=colors[i % len(colors)],
-            )
+            if combination == 'All_triggers':
+                # Use a distinct style for 'All_triggers'
+                hep.histplot(
+                    hists[combination],
+                    bins=bin_edges,
+                    yerr=False,
+                    label=combination,
+                    ax=ax,
+                    color='red',  # Distinct color
+                    linestyle='-',  # Solid line
+                    linewidth=2,
+                    zorder=5  # Bring to front
+                )
+            else:
+                hep.histplot(
+                    hists[combination],
+                    bins=bin_edges,
+                    yerr=False,
+                    label=combination,
+                    ax=ax,
+                    color=colors[i % len(colors)],
+                )
 
             # Plot ratio
-            hep.histplot(
-                (ratios[combination], bin_edges),
-                yerr=False,
-                label=tags[i] if tags else combination,
-                ax=rax,
-                histtype='errorbar',
-                color=colors[i % len(colors)],
-                capsize=4,
-            )
+            if combination == 'All_triggers':
+                hep.histplot(
+                    (ratios[combination], bin_edges),
+                    yerr=False,
+                    label=combination,
+                    ax=rax,
+                    histtype='step',
+                    color='red',  # Same distinct color
+                    linewidth=2,
+                    zorder=5  # Bring to front
+                )
+            else:
+                hep.histplot(
+                    (ratios[combination], bin_edges),
+                    yerr=False,
+                    label=combination,
+                    ax=rax,
+                    histtype='step',
+                    color=colors[i % len(colors)],
+                )
 
             # Compute total efficiency for this combination
             total_events = np.sum(hists['All'])
@@ -735,7 +765,7 @@ def plot_1d_trigger_soup_cms(output, trig_vars, tags=[], save_dir=None, year=202
                 max_efficiency = total_efficiency
 
         # Set labels and titles
-        title = f" (Max Efficiency: {max_efficiency:.2%})"
+        title = f"{var_name} (Max Efficiency: {max_efficiency:.2%})"
         ax.set_title(title)
 
         ax.set_ylabel("Events [A.U.]")
@@ -744,13 +774,15 @@ def plot_1d_trigger_soup_cms(output, trig_vars, tags=[], save_dir=None, year=202
         rax.legend()
         rax.grid(axis='y')
         rax.set_xlabel(trig_vars[var_name]['label'])
-        rax.set_ylabel("Triggered / All")
+        rax.set_ylabel("Efficiency")
+        print("Baseline histogram counts:", hists['All'])
+        print("'All_triggers' histogram counts:", hists['All_triggers'])
+
 
         # Add CMS label (modify according to your style)
         hep.cms.label(ax=ax, data=False, year=year, com="13.6 TeV")
 
-        # Save and show the figure
+        # Save the figure
         plt.savefig(f"{save_dir}/{var_name}_trigger_soup.png", dpi=200, bbox_inches='tight')
         plt.show()
         plt.close(fig)
-
