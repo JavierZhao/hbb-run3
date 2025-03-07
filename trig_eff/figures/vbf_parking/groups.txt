@@ -1,0 +1,81 @@
+vbf_parking_trigger_groups = {
+    "Group_A": [
+        "Mu10_TrkIsoVVL_DiPFJet40_DEta3p5_MJJ750_HTT350_PFMETNoMu60",
+        "Mu8_TrkIsoVVL_DiPFJet40_DEta3p5_MJJ750_HTT300_PFMETNoMu60",
+        "Mu4_TrkIsoVVL_DiPFJet90_40_DEta3p5_MJJ750_HTT300_PFMETNoMu60"
+    ],
+    "Group_B": [
+        "DiJet110_35_Mjj650_PFMET110",
+        "DiJet110_35_Mjj650_PFMET120",
+        "DiJet110_35_Mjj650_PFMET130",
+        "TripleJet110_35_35_Mjj650_PFMET110",
+        "TripleJet110_35_35_Mjj650_PFMET120",
+        "TripleJet110_35_35_Mjj650_PFMET130"
+    ],
+    "Group_C": [
+        "QuadPFJet103_88_75_15_DoublePFBTagDeepJet_1p3_7p7_VBF1",
+        "QuadPFJet103_88_75_15_PFBTagDeepJet_1p3_VBF2",
+        "QuadPFJet105_88_76_15_DoublePFBTagDeepJet_1p3_7p7_VBF1",
+        "QuadPFJet105_88_76_15_PFBTagDeepJet_1p3_VBF2",
+        "QuadPFJet111_90_80_15_DoublePFBTagDeepJet_1p3_7p7_VBF1",
+        "QuadPFJet111_90_80_15_PFBTagDeepJet_1p3_VBF2"
+    ],
+    "Group_D": [
+        "QuadPFJet100_88_70_30_PNet1CvsAll0p5_VBF3Tight",
+        "QuadPFJet105_88_75_30_PNet1CvsAll0p5_VBF3Tight",
+        "QuadPFJet111_90_80_30_PNet1CvsAll0p6_VBF3Tight"
+    ],
+    "Group_E": [
+        "VBF_DiPFJet70_40_Mjj600_Detajj2p5_DiPFJet60_JetMatchingQuadJet",
+        "VBF_DiPFJet70_40_Mjj600_Detajj2p5_DiPFJet60_JetMatchingFiveJet",
+        "VBF_DiPFJet70_40_Mjj600_Detajj2p5_DiPFJet60_JetMatchingSixJet",
+        "VBF_DiPFJet75_45_Mjj600_Detajj2p5_DiPFJet60_JetMatchingQuadJet",
+        "VBF_DiPFJet75_45_Mjj600_Detajj2p5_DiPFJet60_JetMatchingFiveJet",
+        "VBF_DiPFJet75_45_Mjj600_Detajj2p5_DiPFJet60_JetMatchingSixJet"
+    ],
+    "Group_F": [
+        "VBF_DiPFJet75_40_Mjj500_Detajj2p5_PFMET85",
+        "VBF_DiPFJet75_40_Mjj500_Detajj2p5_PFMET85_TriplePFJet"
+    ],
+    "Group_F2": [
+        "VBF_DiPFJet80_45_Mjj500_Detajj2p5_PFMET85",
+        "VBF_DiPFJet80_45_Mjj500_Detajj2p5_PFMET85_TriplePFJet"
+    ],
+    "Group_G": [
+        "VBF_DiPFJet90_40_Mjj600_Detajj2p5_Mu3_TrkIsoVVL",
+        "VBF_DiPFJet90_40_Mjj600_Detajj2p5_Mu3_TrkIsoVVL_TriplePFJet"
+    ],
+    "Group_H": [
+        "VBF_DiPFJet95_45_Mjj600_Detajj2p5_Mu3_TrkIsoVVL",
+        "VBF_DiPFJet95_45_Mjj600_Detajj2p5_Mu3_TrkIsoVVL_TriplePFJet"
+    ],
+    "Group_I": [
+        "VBF_DiPFJet45_Mjj500_Detajj2p5_MediumDeepTauPFTauHPS45_L2NN_eta2p1",
+        "VBF_DoubleMediumDeepTauPFTauHPS20_eta2p1",
+        "DoublePFJets40_Mass500_MediumDeepTauPFTauHPS45_L2NN_MediumDeepTauPFTauHPS20_eta2p1"
+    ],
+    "Group_J": [
+        "VBF_DiPFJet105_40_Mjj1000_Detajj3p5",
+        "VBF_DiPFJet105_40_Mjj1000_Detajj3p5_TriplePFJet",
+        "VBF_DiPFJet110_40_Mjj1000_Detajj3p5",
+        "VBF_DiPFJet110_40_Mjj1000_Detajj3p5_TriplePFJet",
+        "VBF_DiPFJet125_45_Mjj1000_Detajj3p5",
+        "VBF_DiPFJet125_45_Mjj1000_Detajj3p5_TriplePFJet"
+    ],
+    "Group_K": {
+        "Photon": [
+            "VBF_DiPFJet45_Mjj500_Detajj2p5_Photon12",
+            "VBF_DiPFJet45_Mjj500_Detajj2p5_Photon17",
+            "VBF_DiPFJet50_Mjj500_Detajj2p5_Photon22"
+        ],
+        "Electron": [
+            "VBF_DiPFJet45_Mjj500_Detajj2p5_Ele12_eta2p1_WPTight_Gsf",
+            "VBF_DiPFJet45_Mjj500_Detajj2p5_Ele17_eta2p1_WPTight_Gsf",
+            "VBF_DiPFJet50_Mjj500_Detajj2p5_Ele22_eta2p1_WPTight_Gsf"
+        ]
+    },
+    "Group_M": [
+        "VBF_DiPFJet125_45_Mjj720_Detajj3p0",
+        "VBF_DiPFJet125_45_Mjj720_Detajj3p0_TriplePFJet"
+    ]
+}
