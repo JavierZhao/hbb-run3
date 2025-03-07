@@ -1,0 +1,45 @@
+trigger_dict_periods = {
+    '2022': [
+        'AK8PFJet250_SoftDropMass40_PFAK8ParticleNetBB0p35',
+        'AK8PFJet425_SoftDropMass40'
+    ],
+    '2022EE': [
+        'AK8PFJet250_SoftDropMass40_PFAK8ParticleNetBB0p35',
+        'AK8PFJet425_SoftDropMass40'
+    ],
+    '2023': [
+        'AK8PFJet250_SoftDropMass40_PNetBB0p06',
+        'AK8PFJet425_SoftDropMass40'
+    ],
+    '2023BPix': [
+        'AK8PFJet250_SoftDropMass40_PNetBB0p06',
+        'AK8PFJet425_SoftDropMass40'
+    ]
+}
+
+quad_trigger_dict_periods = {
+    '2022': [
+        'QuadPFJet105_88_76_15_DoublePFBTagDeepJet_1p3_7p7_VBF1',
+        'QuadPFJet70_50_40_35_PFBTagParticleNet_2BTagSum0p65',
+        'QuadPFJet103_88_75_15_PFBTagDeepJet_1p3_VBF2',
+        'QuadPFJet103_88_75_15_DoublePFBTagDeepJet_1p3_7p7_VBF1'
+    ],
+    '2022EE': [
+        'QuadPFJet105_88_76_15_DoublePFBTagDeepJet_1p3_7p7_VBF1',
+        'QuadPFJet70_50_40_35_PFBTagParticleNet_2BTagSum0p65',
+        'QuadPFJet103_88_75_15_PFBTagDeepJet_1p3_VBF2',
+        'QuadPFJet103_88_75_15_DoublePFBTagDeepJet_1p3_7p7_VBF1'
+    ],
+    '2023': [
+        'QuadPFJet105_88_76_15_DoublePFBTagDeepJet_1p3_7p7_VBF1',
+        'PFHT340_QuadPFJet70_50_40_40_PNet2BTagMean0p70',
+        'QuadPFJet103_88_75_15_PFBTagDeepJet_1p3_VBF2',
+        'QuadPFJet103_88_75_15_DoublePFBTagDeepJet_1p3_7p7_VBF1'
+    ],
+    '2023BPix': [
+        'QuadPFJet105_88_76_15_DoublePFBTagDeepJet_1p3_7p7_VBF1',
+        'PFHT340_QuadPFJet70_50_40_40_PNet2BTagMean0p70',
+        'QuadPFJet103_88_75_15_PFBTagDeepJet_1p3_VBF2',
+        'QuadPFJet103_88_75_15_DoublePFBTagDeepJet_1p3_7p7_VBF1'
+    ]
+}
