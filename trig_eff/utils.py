@@ -626,7 +626,7 @@ def plot_1d_trigger_soup_compact(output, trig_vars, tags=[], save_dir=None):
     plt.savefig(f"{save_dir}/trigger_soup.png", dpi=200, bbox_inches='tight')
     plt.show()
     plt.close(fig)
-
+    
 def plot_1d_trigger_soup_cms(output, trig_vars, save_dir=None, year=2022):
     """
     Plot the trigger efficiencies for each trigger combination.
@@ -682,7 +682,7 @@ def plot_1d_trigger_soup_cms(output, trig_vars, save_dir=None, year=2022):
         # 'All' histogram (denominator for efficiency)
         hists['All'], _ = np.histogram(total_values, bins=bin_edges, weights=weights_total)
 
-        # Plot 'Baseline' histogram
+        # Plot 'Baseline' histogram (no efficiency shown for baseline)
         hep.histplot(
             hists['All'],
             bins=bin_edges,
@@ -696,17 +696,27 @@ def plot_1d_trigger_soup_cms(output, trig_vars, save_dir=None, year=2022):
 
         max_efficiency = 0.0  # Initialize maximum efficiency
 
-        # Now loop over combinations to plot each trigger's data and ratio
+        # Loop over combinations to plot each trigger's data and ratio
         for i, combination in enumerate(combination_names):
             pass_values = np.array(output[combination][var_name]['pass'])
             weights_pass = np.ones_like(pass_values)  # Modify if you have actual weights
 
+            # Create histogram for passing events
             hists[combination], _ = np.histogram(pass_values, bins=bin_edges, weights=weights_pass)
             ratios[combination] = np.divide(
                 hists[combination], hists['All'],
                 out=np.zeros_like(hists[combination], dtype=float),
                 where=hists['All'] != 0
             )
+
+            # Compute total efficiency for this combination before plotting
+            total_events = np.sum(hists['All'])
+            passed_events = np.sum(hists[combination])
+            total_efficiency = passed_events / total_events if total_events > 0 else 0.0
+            total_efficiencies[combination] = total_efficiency
+
+            # Create label that includes the efficiency (formatted as a percentage)
+            label_str = f"{combination} ({total_efficiency:.2%})"
 
             # Plot histogram for this combination
             if combination == 'All_triggers':
@@ -715,7 +725,7 @@ def plot_1d_trigger_soup_cms(output, trig_vars, save_dir=None, year=2022):
                     hists[combination],
                     bins=bin_edges,
                     yerr=False,
-                    label=combination,
+                    label=label_str,
                     ax=ax,
                     color='red',  # Distinct color
                     linestyle='-',  # Solid line
@@ -727,17 +737,16 @@ def plot_1d_trigger_soup_cms(output, trig_vars, save_dir=None, year=2022):
                     hists[combination],
                     bins=bin_edges,
                     yerr=False,
-                    label=combination,
+                    label=label_str,
                     ax=ax,
                     color=colors[i % len(colors)],
                 )
 
-            # Plot ratio
+            # Plot ratio for this combination
             if combination == 'All_triggers':
                 hep.histplot(
                     (ratios[combination], bin_edges),
                     yerr=False,
-                    label=combination,
                     ax=rax,
                     histtype='step',
                     color='red',  # Same distinct color
@@ -748,19 +757,12 @@ def plot_1d_trigger_soup_cms(output, trig_vars, save_dir=None, year=2022):
                 hep.histplot(
                     (ratios[combination], bin_edges),
                     yerr=False,
-                    label=combination,
                     ax=rax,
                     histtype='step',
                     color=colors[i % len(colors)],
                 )
 
-            # Compute total efficiency for this combination
-            total_events = np.sum(hists['All'])
-            passed_events = np.sum(hists[combination])
-            total_efficiency = passed_events / total_events if total_events > 0 else 0.0
-            total_efficiencies[combination] = total_efficiency
-
-            # Update maximum efficiency
+            # Update maximum efficiency if necessary
             if total_efficiency > max_efficiency:
                 max_efficiency = total_efficiency
 
@@ -775,9 +777,8 @@ def plot_1d_trigger_soup_cms(output, trig_vars, save_dir=None, year=2022):
         rax.grid(axis='y')
         rax.set_xlabel(trig_vars[var_name]['label'])
         rax.set_ylabel("Efficiency")
-        print("Baseline histogram counts:", hists['All'])
-        print("'All_triggers' histogram counts:", hists['All_triggers'])
-
+        # print("Baseline histogram counts:", hists['All'])
+        # print("'All_triggers' histogram counts:", hists['All_triggers'])
 
         # Add CMS label (modify according to your style)
         hep.cms.label(ax=ax, data=False, year=year, com="13.6 TeV")
