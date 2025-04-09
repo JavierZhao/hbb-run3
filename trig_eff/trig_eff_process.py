@@ -28,6 +28,64 @@ mpl.rcParams['lines.linewidth'] = 5
 import itertools
 import json
 
+import numpy as np
+import awkward as ak
+
+def create_baseline_selection_mask_new(events, tag):
+    n_events = len(events)
+    # Start with all events selected.
+    baseline_mask = np.ones(n_events, dtype=bool)
+    
+    # ------------------------------------------------------------------
+    # Step 1: Common jet selection, e.g. require at least one AK4 jet with pt > 15 GeV.
+    jets_all = events.Jet[events.Jet.pt > 15]
+    has_jets = ak.num(jets_all) >= 1
+    baseline_mask &= ak.to_numpy(has_jets)
+    
+    # ------------------------------------------------------------------
+    # Step 2: General selection on FatJets.
+    # Select events that have at least one FatJet satisfying:
+    #   - pt > 250,
+    #   - |eta| < 2.5, and
+    #   - particleNet_XbbVsQCD > 0.4.
+    fatjets = events.FatJet
+    fatjet_mask = (fatjets.pt > 250) & (abs(fatjets.eta) < 2.5) & (fatjets.particleNet_XbbVsQCD > 0.4)
+    has_fatjet = ak.sum(fatjet_mask, axis=1) >= 1
+    baseline_mask &= ak.to_numpy(has_fatjet)
+    
+    # ------------------------------------------------------------------
+    # Step 3: If tag is "VBF", apply additional VBF selection on top of general selection.
+    if tag == "VBF":
+        # Select additional jets (AK4) with:
+        #   - pt > 15 GeV (common threshold) and
+        #   - |eta| < 5.0.
+        additional_jets = events.Jet[(events.Jet.pt > 15) & (abs(events.Jet.eta) < 5.0)]
+        # Require at least two such jets per event.
+        has_two_jets = ak.num(additional_jets) >= 2
+        
+        # Form all combinations of two jets in each event.
+        jet_pairs = ak.combinations(additional_jets, 2, fields=["jet1", "jet2"])
+        # Calculate the absolute difference in eta (rapidity separation) of the two jets.
+        delta_eta = abs(jet_pairs.jet1.eta - jet_pairs.jet2.eta)
+        # Calculate the dijet invariant mass for the jet pair.
+        mjj = (jet_pairs.jet1 + jet_pairs.jet2).mass
+        # VBF criteria: at least one pair must satisfy:
+        #   - |delta_eta| > 2.0, and
+        #   - mjj > 500 GeV.
+        has_valid_pair = ak.any((delta_eta > 2.0) & (mjj > 500), axis=1)
+        
+        # Combine the VBF-specific requirements.
+        vbf_mask = has_two_jets & has_valid_pair
+        
+        # Update the cumulative baseline mask.
+        baseline_mask &= ak.to_numpy(vbf_mask)
+    
+    # Final sanity check: baseline_mask length must equal the number of original events.
+    assert len(baseline_mask) == n_events, "Baseline mask length does not match number of events!"
+    
+    return baseline_mask
+
+
 def create_baseline_selection_mask(events, tag):
     n_events = len(events)
     
@@ -71,6 +129,8 @@ def create_baseline_selection_mask(events, tag):
             (jets[:, 3].pt > 15)
         )
         leading_jet_pt_mask = ak.to_numpy(leading_jet_pt_mask)  # Convert to NumPy array
+
+        # Step 3.5: add a PNet
         
         # Update baseline mask
         baseline_mask_indices = np.where(baseline_mask)[0]
