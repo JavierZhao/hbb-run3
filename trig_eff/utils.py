@@ -483,7 +483,7 @@ def compare_trigger_efficiencies(outputs, triggers_dict, trig_vars, baseline_key
                 plt.savefig(f"{save_dir}/{filename}", dpi=200)
                 plt.show()
                 plt.close()
-def plot_cutflow(output, save_dir, small_font_size=12):
+def plot_cutflow(output, save_dir, year, small_font_size=12):
     """
     Creates and saves a cutflow diagram from the provided output dictionary,
     displaying the number of events passing each selection step on top of the bars.
@@ -494,7 +494,7 @@ def plot_cutflow(output, save_dir, small_font_size=12):
     small_font_size (int, optional): Font size for labels and title. Default is 12.
     """
     # Access the cutflow
-    cutflow = output[0]['cutflow']
+    cutflow = output['cutflow']
 
     # Print the cutflow
     for cut, count in cutflow.items():
@@ -520,6 +520,8 @@ def plot_cutflow(output, save_dir, small_font_size=12):
     # Set smaller font sizes for tick labels
     plt.xticks(rotation=45, fontsize=small_font_size)
     plt.yticks(fontsize=small_font_size)
+
+    plt.legend(year)
 
     plt.grid(axis='y')
     plt.tight_layout()
