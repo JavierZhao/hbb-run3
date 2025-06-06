@@ -483,56 +483,69 @@ def compare_trigger_efficiencies(outputs, triggers_dict, trig_vars, baseline_key
                 plt.savefig(f"{save_dir}/{filename}", dpi=200)
                 plt.show()
                 plt.close()
+                
+import os
+import numpy as np
+import matplotlib.pyplot as plt
+import mplhep as hep
+
 def plot_cutflow(output, save_dir, year, small_font_size=12):
     """
-    Creates and saves a cutflow diagram from the provided output dictionary,
+    Creates and saves a CMS-style cutflow diagram from the provided output dictionary,
     displaying the number of events passing each selection step on top of the bars.
 
     Parameters:
-    output (list): A list containing dictionaries, where the first dictionary should have a 'cutflow' key.
+    output (dict): A dictionary containing a 'cutflow' key with selection names and event counts.
     save_dir (str): The directory where the plot will be saved.
+    year (int): The data-taking year (for the CMS label).
     small_font_size (int, optional): Font size for labels and title. Default is 12.
     """
-    # Access the cutflow
+    # Access the cutflow dictionary and print the counts
     cutflow = output['cutflow']
-
-    # Print the cutflow
     for cut, count in cutflow.items():
         print(f"{cut}: {count}")
 
-    # Prepare data
+    # Prepare data for plotting
     cuts = list(cutflow.keys())
     counts = [cutflow[cut] for cut in cuts]
 
-    # Plot
-    plt.figure(figsize=(10, 6))
-    plt.yscale("log")
-    bars = plt.bar(cuts, counts, color='skyblue')
+    # Update global font size for CMS-style plots
+    plt.rcParams.update({"font.size": small_font_size})
 
-    # Add counts on top of each bar using bar_label (Matplotlib ≥ 3.4)
-    plt.bar_label(bars, labels=[str(count) for count in counts], padding=3, fontsize=small_font_size)
-
-    # Set smaller font sizes for labels and title
-    plt.xlabel('Selection Steps', fontsize=small_font_size)
-    plt.ylabel('Number of Events', fontsize=small_font_size)
-    plt.title('Cutflow Diagram', fontsize=small_font_size)
-
-    # Set smaller font sizes for tick labels
+    # Create figure and CMS style axis
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.set_yscale("log")
+    
+    # Plot the bars with a CMS-inspired color scheme and edge color
+    bars = ax.bar(cuts, counts, color='C1', edgecolor='black', linewidth=1)
+    
+    # Add event count labels on top of each bar
+    ax.bar_label(bars, labels=[str(count) for count in counts], padding=3, fontsize=small_font_size)
+    
+    # Set axes labels and title
+    ax.set_xlabel("Selection Steps", fontsize=small_font_size)
+    ax.set_ylabel("Number of Events", fontsize=small_font_size)
+    ax.set_title("Cutflow Diagram", fontsize=small_font_size)
+    
+    # Rotate x-tick labels for readability and set tick label sizes
     plt.xticks(rotation=45, fontsize=small_font_size)
     plt.yticks(fontsize=small_font_size)
-
-    plt.legend(year)
-
-    plt.grid(axis='y')
+    
+    # Add grid on the y-axis
+    ax.grid(axis='y')
+    
+    # Add CMS label (see reference: plot_1d_trigger_soup_cms)
+    hep.cms.label(ax=ax, data=False, year=year, com="Preliminary")
+    
     plt.tight_layout()
-
-    # Ensure save directory exists
+    
+    # Ensure save directory exists and then save the figure
     os.makedirs(save_dir, exist_ok=True)
-
-    # Save the plot
-    plt.savefig(os.path.join(save_dir, "cutFlow.png"), bbox_inches='tight', dpi=300)
+    fig_path = os.path.join(save_dir, "cutFlow_cms.png")
+    plt.savefig(fig_path, bbox_inches='tight', dpi=300)
     plt.show()
-    plt.close()
+    plt.close(fig)
+
 
 # Example usage:
 # plot_cutflow(output, "/srv/figures/VBF_baseline/cutFlow/")
@@ -629,7 +642,7 @@ def plot_1d_trigger_soup_compact(output, trig_vars, tags=[], save_dir=None):
     plt.show()
     plt.close(fig)
     
-def plot_1d_trigger_soup_cms(output, trig_vars, save_dir=None, year=2022):
+def plot_1d_trigger_soup_cms(output, trig_vars, save_dir=None, year=2022, data=False, show_img=True):
     """
     Plot the trigger efficiencies for each trigger combination.
 
@@ -642,6 +655,8 @@ def plot_1d_trigger_soup_cms(output, trig_vars, save_dir=None, year=2022):
         Directory to save the figures. If None, defaults to "./figures".
     - year: int, optional
         Year label for the plots.
+    - data: bool, optiona
+        plotting with data or MC
     """
     import os
     import numpy as np
@@ -783,9 +798,12 @@ def plot_1d_trigger_soup_cms(output, trig_vars, save_dir=None, year=2022):
         # print("'All_triggers' histogram counts:", hists['All_triggers'])
 
         # Add CMS label (modify according to your style)
-        hep.cms.label(ax=ax, data=False, year=year, com="13.6 TeV")
+        hep.cms.label(ax=ax, data=data, year=year, com="13.6")
 
         # Save the figure
         plt.savefig(f"{save_dir}/{var_name}_trigger_soup.png", dpi=200, bbox_inches='tight')
-        plt.show()
+        if show_img:
+            plt.show()
+        else:
+            print(f"Saved {save_dir}/{var_name}_trigger_soup.png")
         plt.close(fig)

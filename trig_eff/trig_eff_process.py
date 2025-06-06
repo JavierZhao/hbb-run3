@@ -22,14 +22,118 @@ params = {'legend.fontsize': 'medium',
          'ytick.labelsize':'medium'}
 pylab.rcParams.update(params)
 
-#line thickness
-import matplotlib as mpl
-mpl.rcParams['lines.linewidth'] = 5
 import itertools
 import json
 
 import numpy as np
 import awkward as ak
+
+
+
+class ParkingSoupProcessor(processor.ProcessorABC):
+    """
+    Calculate histograms for three scenarios:
+      1) Baseline (no triggers)
+      2) Orig + 4Quad triggers combined
+      3) Orig + PNetQuad trigger only
+    """
+    def __init__(self, orig_trig_soup, parking_trig_soup, trig_vars, group_1_tag, group_2_tag, baseline_key='VBF'):
+        self.orig_trig_soup = orig_trig_soup
+        self.parking_trig_soup = parking_trig_soup
+        self.trig_vars = trig_vars
+        self.baseline_key = baseline_key
+        self.group_1_tag = group_1_tag
+        self.group_2_tag = group_2_tag
+
+        # Prepare the accumulators for output
+        # We'll store:
+        #  - "Baseline" as a list accumulator (no 'pass' sub-key, because it's just total baseline distribution)
+        #  - "Orig+Parking" has sub-key 'pass'
+        #  - "Orig" has sub-key 'pass'
+        self.output = dict_accumulator({
+            'Baseline': dict_accumulator({
+                var_name: list_accumulator() for var_name in trig_vars
+            }),
+            group_1_tag: dict_accumulator({
+                var_name: dict_accumulator({'pass': list_accumulator()})
+                for var_name in trig_vars
+            }),
+            group_2_tag: dict_accumulator({
+                var_name: dict_accumulator({'pass': list_accumulator()})
+                for var_name in trig_vars
+            }),
+        })
+
+    def process(self, events):
+        output = self.output
+
+        # 1) Compute baseline mask
+        baseline_mask = create_baseline_selection_mask_new(events, tag=self.baseline_key)
+
+        # 2) Compute variable arrays (and a valid-vars mask)
+        variables = {}
+        for var_name, var_info in self.trig_vars.items():
+            # var_info['proc'] should be a callable that computes the variable array
+            var_array = var_info['proc'](events)
+            variables[var_name] = var_array
+
+        valid_vars_mask = np.ones(len(events), dtype=bool)
+        for var_array in variables.values():
+            # convert to numpy to check NaNs
+            valid_vars_mask &= ~np.isnan(ak.to_numpy(var_array))
+
+        # 3) The "baseline" selection = baseline_mask & valid_vars_mask
+        selection_baseline = baseline_mask & valid_vars_mask
+
+        #    Fill "Baseline" histograms (no trigger requirement)
+        for var_name in self.trig_vars:
+            var_array = variables[var_name]
+            var_total = var_array[selection_baseline]
+            output['Baseline'][var_name].extend(ak.to_numpy(var_total).tolist())
+
+        # 4) Build combined trigger masks:
+        #    -- orig triggers
+        if len(self.orig_trig_soup) > 0:
+            combined_orig_mask = ak.zeros_like(events.HLT[self.orig_trig_soup[0]], dtype=bool)
+            for trig in self.orig_trig_soup:
+                combined_orig_mask = combined_orig_mask | events.HLT[trig]
+        else:
+            # If no orig triggers provided, mask is all False
+            combined_orig_mask = ak.zeros_like(baseline_mask, dtype=bool)
+
+        #    -- parking triggers
+        if len(self.parking_trig_soup) > 0:
+            combined_parking_mask = ak.zeros_like(events.HLT[self.parking_trig_soup[0]], dtype=bool)
+            for trig in self.parking_trig_soup:
+                combined_parking_mask = combined_parking_mask | events.HLT[trig]
+        else:
+            # If no parking triggers provided, mask is all False
+            combined_parking_mask = ak.zeros_like(baseline_mask, dtype=bool)
+
+        #    -- orig+parking combined (logical OR)
+        combined_orig_plus_parking_mask = combined_orig_mask | combined_parking_mask
+
+        # 5) Form the final pass selections (baseline & triggers & valid_vars)
+        selection_pass_orig = baseline_mask & combined_orig_mask & valid_vars_mask
+        selection_pass_orig_plus_parking = baseline_mask & combined_orig_plus_parking_mask & valid_vars_mask
+
+        # 6) Fill histograms: "Orig" and "OrigPlusParking"
+        for var_name in self.trig_vars:
+            var_array = variables[var_name]
+
+            # Orig
+            var_pass_orig = var_array[selection_pass_orig]
+            output[self.group_1_tag][var_name]['pass'].extend(ak.to_numpy(var_pass_orig).tolist())
+
+            # Orig + Parking
+            var_pass_orig_plus_parking = var_array[selection_pass_orig_plus_parking]
+            output[self.group_2_tag][var_name]['pass'].extend(ak.to_numpy(var_pass_orig_plus_parking).tolist())
+
+        return output
+
+    def postprocess(self, accumulator):
+        return accumulator
+
 
 def create_baseline_selection_mask_new(events, tag):
     n_events = len(events)
@@ -52,6 +156,15 @@ def create_baseline_selection_mask_new(events, tag):
     fatjet_mask = (fatjets.pt > 250) & (abs(fatjets.eta) < 2.5) & (fatjets.particleNet_XbbVsQCD > 0.4)
     has_fatjet = ak.sum(fatjet_mask, axis=1) >= 1
     baseline_mask &= ak.to_numpy(has_fatjet)
+
+    candidatejet = fatjets[
+            (fatjets.pt > 200)
+            & (abs(fatjets.eta) < 2.5)
+            & fatjets.isTight 
+        ]
+    candidatejet = candidatejet[:, :2]
+    candidatejet = ak.firsts(candidatejet[ak.argmax(candidatejet.particleNet_XbbVsQCD, axis=1, keepdims=True)])
+
     
     # ------------------------------------------------------------------
     # Step 3: If tag is "VBF", apply additional VBF selection on top of general selection.
@@ -59,20 +172,41 @@ def create_baseline_selection_mask_new(events, tag):
         # Select additional jets (AK4) with:
         #   - pt > 15 GeV (common threshold) and
         #   - |eta| < 5.0.
-        additional_jets = events.Jet[(events.Jet.pt > 15) & (abs(events.Jet.eta) < 5.0)]
-        # Require at least two such jets per event.
-        has_two_jets = ak.num(additional_jets) >= 2
+        jets = events.Jet
+        jets = jets[
+            (jets.pt > 30.)
+            & (abs(jets.eta) < 5.0)
+            & jets.isTight
+        ]
+
+        # only consider first 4 jets to be consistent with old framework
+        jets = jets[:, :4]
         
-        # Form all combinations of two jets in each event.
-        jet_pairs = ak.combinations(additional_jets, 2, fields=["jet1", "jet2"])
-        # Calculate the absolute difference in eta (rapidity separation) of the two jets.
-        delta_eta = abs(jet_pairs.jet1.eta - jet_pairs.jet2.eta)
-        # Calculate the dijet invariant mass for the jet pair.
-        mjj = (jet_pairs.jet1 + jet_pairs.jet2).mass
-        # VBF criteria: at least one pair must satisfy:
-        #   - |delta_eta| > 2.0, and
-        #   - mjj > 500 GeV.
-        has_valid_pair = ak.any((delta_eta > 2.0) & (mjj > 500), axis=1)
+        # Require at least two such jets per event.
+        has_two_jets = ak.num(jets) >= 2
+        
+        # VBF specific variables                                                      
+        dR = jets.delta_r(candidatejet)
+        ak4_outside_ak8 = jets[dR > 0.8]
+
+        jet1 = ak4_outside_ak8[:, 0:1]
+        jet2 = ak4_outside_ak8[:, 1:2]
+
+        deta = abs(ak.firsts(jet1).eta - ak.firsts(jet2).eta)
+        mjj = ( ak.firsts(jet1) + ak.firsts(jet2) ).mass
+
+        has_valid_pair = ((deta > 3.5) & (mjj > 1000))
+        
+        # # Form all combinations of two jets in each event.
+        # jet_pairs = ak.combinations(additional_jets, 2, fields=["jet1", "jet2"])
+        # # Calculate the absolute difference in eta (rapidity separation) of the two jets.
+        # delta_eta = abs(jet_pairs.jet1.eta - jet_pairs.jet2.eta)
+        # # Calculate the dijet invariant mass for the jet pair.
+        # mjj = (jet_pairs.jet1 + jet_pairs.jet2).mass
+        # # VBF criteria: at least one pair must satisfy:
+        # #   - |delta_eta| > 3.5, and
+        # #   - mjj > 1000 GeV.
+        # has_valid_pair = ak.any((deta > 3.5) & (mjj > 1000), axis=1)
         
         # Combine the VBF-specific requirements.
         vbf_mask = has_two_jets & has_valid_pair
@@ -506,75 +640,95 @@ class GeneralBaselineCutFlowProcessor(processor.ProcessorABC):
         cutflow['All events'] = cutflow.get('All events', 0) + n_events
 
         ### Start of the selection steps ###
-
-        # Initialize cumulative event mask as an Awkward Array
+        # Initialize cumulative event mask (as an Awkward Array)
         cumulative_event_mask = ak.from_numpy(np.ones(n_events, dtype=bool))
 
-        # Step 1: Select FatJets with pt > 250 GeV and abs(eta) < 2.5
-        fatjets_mask = (events.FatJet.pt > 250) & (abs(events.FatJet.eta) < 2.5)
+        # ------------------------------------------------------------------
+        # Step 1: Common selection: require at least one AK4 jet with pt > 15 GeV.
+        jets_all = events.Jet[events.Jet.pt > 15]
+        has_jets = ak.num(jets_all) >= 1
+        cumulative_event_mask = cumulative_event_mask & has_jets
 
-        # Require at least one such fatjet per event
-        has_fatjet = ak.sum(fatjets_mask, axis=-1) >= 1
+        n_events_has_jets = int(ak.sum(cumulative_event_mask))
+        cutflow['AK4 pt > 15'] = \
+            cutflow.get('AK4 pt > 15', 0) + n_events_has_jets
 
-        # Update cumulative event mask
+        # ------------------------------------------------------------------
+        # Step 2: General selection on FatJets.
+        # Require at least one FatJet with:
+        #   - pt > 250,
+        #   - |eta| < 2.5, and
+        #   - particleNet_XbbVsQCD > 0.4.
+        fatjets = events.FatJet
+        fatjet_mask = (fatjets.pt > 250) & (abs(fatjets.eta) < 2.5) & (fatjets.particleNet_XbbVsQCD > 0.4)
+        has_fatjet = ak.sum(fatjet_mask, axis=1) >= 1
         cumulative_event_mask = cumulative_event_mask & has_fatjet
-        
-        n_events_has_fatjet = ak.sum(cumulative_event_mask)
-        cutflow['At least 1 FatJet with pt > 250 GeV and abs(eta) < 2.5'] = (
-            cutflow.get('At least 1 FatJet with pt > 250 GeV and abs(eta) < 2.5', 0) + n_events_has_fatjet
+
+        n_events_has_fatjet = int(ak.sum(cumulative_event_mask))
+        cutflow['FatJet'] = (
+            cutflow.get('FatJet', 0)
+            + n_events_has_fatjet
         )
 
-        
+        # ------------------------------------------------------------------
+        # --- VBF-specific selection ---
+        # Select additional AK4 jets with:
+        #   - pt > 30 GeV,
+        #   - |eta| < 5.0, and
+        #   - passing tight identification (isTight).
+        jets = events.Jet[(events.Jet.pt > 30) &
+                          (abs(events.Jet.eta) < 5.0) &
+                          (events.Jet.isTight)]
+        # Only consider the first 4 jets per event (to be consistent with the old framework)
+        jets = jets[:, :4]
 
-        # Step 2: Select AK4 jets with abs(eta) < 5
-        jets_mask = abs(events.Jet.eta) < 5.0
+        # Require at least two such jets per event.
+        has_two_jets = ak.num(jets) >= 2
 
-        # Require at least 4 such AK4 jets per event
-        has_four_jets = ak.sum(jets_mask, axis=-1) >= 4
+        # Define the candidate fatjet using the FatJet selection from Step 2.
+        # Here we take the first FatJet that passes our fatjet_mask.
+        candidatejet = ak.firsts(events.FatJet[fatjet_mask])
 
-        # Update cumulative event mask
-        cumulative_event_mask = cumulative_event_mask & has_four_jets
-        
-        n_events_four_jets = ak.sum(cumulative_event_mask)
-        cutflow['At least 4 AK4 jets with abs(eta) < 5'] = (
-            cutflow.get('At least 4 AK4 jets with abs(eta) < 5', 0) + n_events_four_jets
+        # Compute ΔR between the selected jets and the candidate fatjet.
+        dR = jets.delta_r(candidatejet)
+        # Exclude jets overlapping with the candidate fatjet by requiring dR > 0.8.
+        ak4_outside_ak8 = jets[dR > 0.8]
+
+        # For VBF variables we only consider the first two non-overlapping jets.
+        jet1 = ak4_outside_ak8[:, 0:1]
+        jet2 = ak4_outside_ak8[:, 1:2]
+
+        # For events where fewer than two jets remain after the ΔR cut,
+        # the following operations will yield None values.
+        # So, require that at least two jets remain.
+        has_two_jets_after_dr = ak.num(ak4_outside_ak8) >= 2
+
+        # Compute rapidity separation (deta) and dijet invariant mass (mjj)
+        deta = abs(ak.firsts(jet1).eta - ak.firsts(jet2).eta)
+        mjj = (ak.firsts(jet1) + ak.firsts(jet2)).mass
+
+        # VBF criteria: require deta > 3.5 and mjj > 1000 GeV.
+        has_valid_pair = (deta > 3.5) & (mjj > 1000)
+
+        # Combine the VBF-specific requirements.
+        vbf_mask = has_two_jets & has_two_jets_after_dr & has_valid_pair
+
+        cumulative_event_mask = cumulative_event_mask & ak.to_numpy(vbf_mask)
+        n_events_vbf = int(ak.sum(cumulative_event_mask))
+        cutflow['VBF selection '] = (
+            cutflow.get('VBF selection', 0)
+            + n_events_vbf
         )
 
-        # Step 3: Form all combinations of two jets (without filtering)
-        jet_pairs = ak.combinations(events.Jet, 2, fields=['jet1', 'jet2'])
+        # Note: No filtering is performed on events/objects throughout these steps to maintain consistent shapes.
 
-        # Create masks for jet pairs based on individual jet selections
-        jet1_mask = abs(jet_pairs.jet1.eta) < 5.0
-        jet2_mask = abs(jet_pairs.jet2.eta) < 5.0
-        jet_pair_mask = jet1_mask & jet2_mask
-
-        # Calculate delta_eta and invariant mass mjj for each pair
-        delta_eta = jet_pairs.jet1.eta - jet_pairs.jet2.eta
-        mjj = (jet_pairs.jet1 + jet_pairs.jet2).mass
-
-        # Apply selection: any pair with delta_eta > 1.5 and mjj > 200
-        selection_mask = jet_pair_mask & (abs(delta_eta) > 1.5) & (mjj > 200)
-        event_has_good_pair = ak.any(selection_mask, axis=1)
-
-        # Update cumulative event mask
-        cumulative_event_mask = cumulative_event_mask & event_has_good_pair
-        
-        n_events_pairs = ak.sum(cumulative_event_mask)
-        cutflow['Any jet pair with delta_eta > 1.5 and mjj > 200'] = (
-            cutflow.get('Any jet pair with delta_eta > 1.5 and mjj > 200', 0) + n_events_pairs
-        )
-
-        
-
-        # Note: Events and objects are not filtered at any step to ensure consistent shapes
-
-        # Optionally, store the cumulative mask in the output if needed
+        # Optionally, you can store the cumulative mask in the output if needed.
         # output['cumulative_event_mask'] = cumulative_event_mask
 
         return output
 
     def postprocess(self, accumulator):
-        # No postprocessing required in this case
+        # No postprocessing required in this example.
         return accumulator
 
 class TriggerSoupProcessor(processor.ProcessorABC):
@@ -622,7 +776,7 @@ class TriggerSoupProcessor(processor.ProcessorABC):
     def process(self, events):
         output = self.output
 
-        baseline = create_baseline_selection_mask(events, tag=self.baseline_key)
+        baseline = create_baseline_selection_mask_new(events, tag=self.baseline_key)
 
         # Compute variables using 'proc' functions from 'trig_vars'
         variables = {}
