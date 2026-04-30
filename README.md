@@ -1,8 +1,8 @@
 # hbb-run3
 
 CMS Run 3 H→bb trigger efficiency and scale-factor analysis. Aim is to reproduce the plot and
-table set from the Run 2 trigger AN (`TRG_AN_RUN_2`) for Run 3 data (2022, 2022EE, 2023, 2023BPix),
-using a muon-triggered tag-and-probe method.
+table set from the Run 2 trigger AN ([`docs/TRG_AN_RUN_2.pdf`](docs/TRG_AN_RUN_2.pdf)) for Run 3
+data (2022, 2022EE, 2023, 2023BPix), using a muon-triggered tag-and-probe method.
 
 The active code lives in [`condor_sf/`](condor_sf/). Three pipelines:
 
@@ -121,7 +121,7 @@ hbb-run3/
 
 ## References
 
-- Run 2 trigger AN (TRG_AN_RUN_2.pdf) — target plot/table set
+- Run 2 trigger AN — [`docs/TRG_AN_RUN_2.pdf`](docs/TRG_AN_RUN_2.pdf) — target plot/table set
 - [Boosted H(bb) Run 3 status presentation](https://indico.cern.ch/event/1624978/contributions/6875328/) — txbb WP = 0.82 motivation
 - [DAZSLE/hbb-run3 corrections](https://github.com/DAZSLE/hbb-run3/blob/main/src/hbb/corrections.py) — JetID correction reference for v14+
 
