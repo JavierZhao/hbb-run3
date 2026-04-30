@@ -1,0 +1,19 @@
+universe               = vanilla
+Executable             = shell
+should_transfer_files  = YES
+when_to_transfer_output= ON_EXIT
+transfer_input_files   = shell, run_sf.sh, scale_factor.py, infiles
+stream_output = True
+stream_error  = True
+on_exit_remove   = (ExitBySignal == False) && (ExitCode == 0)
+max_retries      = 3
+# bring these top-level dirs back
+transfer_output_files  = figures, output
+transfer_output_remaps = "figures=sf_22ee/figures;output=sf_22ee/output"
+
+Output                 = sf_22ee/$(Cluster)_$(Process).out
+Error                  = sf_22ee/$(Cluster)_$(Process).err
+Log                    = sf_22ee/$(Cluster)_$(Process).log
+
+Arguments              = coffeateam/coffea-dask:latest-py3.9 bash run_sf.sh --year 2022EE
+Queue 1

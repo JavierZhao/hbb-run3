@@ -1,0 +1,44 @@
+# JDL for running all trigger efficiency analyses (2D SF + 1D SF)
+# This runs ALL periods (2022, 2022EE, 2023, 2023BPix) sequentially
+#
+# Usage:
+#   condor_submit run_all-condor.jdl
+#
+# For test mode:
+#   condor_submit run_all-condor.jdl TEST_FLAG="--test"
+
+universe               = vanilla
+Executable             = shell
+should_transfer_files  = YES
+when_to_transfer_output= ON_EXIT
+
+# Transfer all necessary scripts and input files
+transfer_input_files   = shell, run_all_analyses.sh, run_sf_2d.sh, run_sf.sh, scale_factor_2d.py, scale_factor.py, infiles
+
+# Stream output for monitoring
+stream_output = True
+stream_error  = True
+
+# Retry on failure
+on_exit_remove   = (ExitBySignal == False) && (ExitCode == 0)
+max_retries      = 3
+
+# Transfer all output directories back
+# Note: This will create subdirectories for each year/mode
+transfer_output_files  = figures_sf_2d, output, sf_2022_OR, sf_2022EE_OR, sf_2023_OR, sf_2023BPix_OR, sf_2d_2022, sf_2d_2022EE, sf_2d_2023, sf_2d_2023BPix
+transfer_output_remaps = "figures_sf_2d=all_analyses/figures_sf_2d;output=all_analyses/output;sf_2022_OR=all_analyses/sf_2022_OR;sf_2022EE_OR=all_analyses/sf_2022EE_OR;sf_2023_OR=all_analyses/sf_2023_OR;sf_2023BPix_OR=all_analyses/sf_2023BPix_OR;sf_2d_2022=all_analyses/sf_2d_2022;sf_2d_2022EE=all_analyses/sf_2d_2022EE;sf_2d_2023=all_analyses/sf_2d_2023;sf_2d_2023BPix=all_analyses/sf_2d_2023BPix"
+
+# Resource requests
+request_memory         = 8 GB
+request_cpus           = 2
+
+# Output files (logs go to predictable directory all_analyses/)
+Output                 = all_analyses/$(Cluster)_$(Process).out
+Error                  = all_analyses/$(Cluster)_$(Process).err
+Log                    = all_analyses/$(Cluster)_$(Process).log
+
+# Run the master script inside singularity container
+# TEST_FLAG can be set to "--test" for test mode
+Arguments              = coffeateam/coffea-dask-almalinux8:2025.10.2-py3.10 bash run_all_analyses.sh $(TEST_FLAG)
+
+Queue 1

@@ -1,0 +1,60 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+
+# --- Jupyter ---
+.ipynb_checkpoints/
+
+# --- OS / IDE ---
+.DS_Store
+.vscode/
+.idea/
+.claude/
+
+# --- HTCondor / Docker / matplotlib local artifacts ---
+.condor_config
+docker_stderror
+.mplconfig/
+
+# --- Per-period analysis output directories under condor_sf/ ---
+condor_sf/eff_22/
+condor_sf/eff_22ee/
+condor_sf/eff_23/
+condor_sf/eff_23bpix/
+condor_sf/sf_22/
+condor_sf/sf_22ee/
+condor_sf/sf_22ee_old/
+condor_sf/sf_23/
+condor_sf/sf_23bpix/
+condor_sf/sf_2d_2022/
+condor_sf/sf_2d_2022EE/
+condor_sf/sf_2d_2023/
+condor_sf/sf_2d_2023BPix/
+condor_sf/sf_TTto4Q/
+condor_sf/trig_eff_2d_2022/
+condor_sf/trig_eff_2d_2022EE/
+condor_sf/trig_eff_2d_2023/
+condor_sf/trig_eff_2d_2023BPix/
+condor_sf/trig_eff_2d_23/
+condor_sf/year_2022/
+condor_sf/year_2022EE/
+condor_sf/year_2023/
+condor_sf/year_2023BPix/
+condor_sf/parking_vbf_2023/
+condor_sf/parking_vbf_2023BPix/
+condor_sf/figures_gen_H_pt_300/
+condor_sf/incomplete_runs/
+condor_sf/my_test_run/
+condor_sf/all_analyses/
+
+# --- Output file types anywhere ---
+*.coffea
+*.log
+*.err
+*.out
+*.pkl
+
+# --- Legacy / scratch ---
+old_runs/

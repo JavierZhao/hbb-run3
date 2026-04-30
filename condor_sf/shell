@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Usage:
+#   ./shell coffeateam/coffea-dask:latest-py3.9 <command to run inside>
+# Example:
+#   ./shell coffeateam/coffea-dask:latest-py3.9 "./run_sf.sh --year 2022 --trigger 0"
+
+if [[ $# -lt 1 ]]; then
+  echo "Please specify a coffea image:"
+  echo "  - coffeateam/coffea-dask-almalinux8:latest   (CalVer)"
+  echo "  - coffeateam/coffea-base-almalinux8:latest   (coffea 0.7)"
+  echo "  - coffeateam/coffea-dask:latest-py3.9        (as in your JDL)"
+  exit 1
+else
+  export COFFEA_IMAGE="$1"
+fi
+
+# Use cmslpc interactive condor tweaks if present; ignore if missing
+if [ -f /etc/condor/config.d/01_cmslpc_interactive ]; then
+  grep -v '^include' /etc/condor/config.d/01_cmslpc_interactive > .condor_config || true
+fi
+
+# Build bind list only from paths that actually exist
+binds=()
+[[ -d /cvmfs ]] && binds+=("/cvmfs")
+[[ -d /cvmfs/grid.cern.ch/etc/grid-security ]] && binds+=("/cvmfs/grid.cern.ch/etc/grid-security:/etc/grid-security")
+[[ -d /uscmst1b_scratch ]] && binds+=("/uscmst1b_scratch")
+# Always bind the job workspace to /srv in the container
+binds+=("${PWD}:/srv")
+
+# If a grid proxy is present, bind it inside so tools can find it
+if [[ -n "${X509_USER_PROXY:-}" && -f "${X509_USER_PROXY}" ]]; then
+  binds+=("${X509_USER_PROXY}:/tmp/x509up_u$(id -u)")
+fi
+
+export APPTAINER_BINDPATH="$(IFS=,; echo "${binds[*]}")"
+
+# Resolve image via CVMFS if available, else use docker://
+IMAGE_PATH="/cvmfs/unpacked.cern.ch/registry.hub.docker.com/${COFFEA_IMAGE}"
+if [[ -e "${IMAGE_PATH}" ]]; then
+  IMAGE_URI="${IMAGE_PATH}"
+else
+  IMAGE_URI="docker://${COFFEA_IMAGE}"
+fi
+
+# Prefer apptainer; fall back to singularity
+RUNTIME="$(command -v apptainer || command -v singularity || true)"
+if [[ -z "${RUNTIME}" ]]; then
+  echo "FATAL: Neither apptainer nor singularity found in PATH." >&2
+  exit 1
+fi
+
+echo "Using container image: ${IMAGE_URI}"
+echo "Bind mounts: ${APPTAINER_BINDPATH}"
+
+# Execute user's command (everything after the image name) inside the container
+# Use bash -lc so that .bashrc is loaded and multiple commands/expansions work
+APPTAINER_SHELL=$(command -v bash) "${RUNTIME}" exec --pwd /srv \
+  "${IMAGE_URI}" /bin/bash --rcfile /srv/.bashrc -lc "${*:2}"

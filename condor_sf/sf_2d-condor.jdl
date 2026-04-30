@@ -1,0 +1,25 @@
+# Template JDL for 2D scale factor analysis
+# To use: condor_submit sf_2d-condor.jdl YEAR=2023
+# Or use the submit_sf_2d.sh wrapper script
+
+universe               = vanilla
+Executable             = shell
+should_transfer_files  = YES
+when_to_transfer_output= ON_EXIT
+transfer_input_files   = shell, run_sf_2d.sh, scale_factor_2d.py, infiles
+stream_output = True
+stream_error  = True
+on_exit_remove   = (ExitBySignal == False) && (ExitCode == 0)
+max_retries      = 3
+# bring these top-level dirs back
+transfer_output_files  = figures_sf_2d, output
+transfer_output_remaps = "figures_sf_2d=sf_2d_$(YEAR)/figures_sf_2d;output=sf_2d_$(YEAR)/output"
+
+request_memory         = 8 GB
+
+Output                 = sf_2d_$(YEAR)/$(Cluster)_$(Process).out
+Error                  = sf_2d_$(YEAR)/$(Cluster)_$(Process).err
+Log                    = sf_2d_$(YEAR)/$(Cluster)_$(Process).log
+
+Arguments              = coffeateam/coffea-dask-almalinux8:2025.10.2-py3.10 bash run_sf_2d.sh --year $(YEAR)
+Queue 1

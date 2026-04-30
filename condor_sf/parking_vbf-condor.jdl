@@ -1,0 +1,37 @@
+# JDL for ParkingVBF trigger efficiency study
+#
+# Usage:
+#   condor_submit parking_vbf-condor.jdl                    # both periods
+#   condor_submit parking_vbf-condor.jdl YEAR=2023          # single period
+#   condor_submit parking_vbf-condor.jdl TEST_FLAG="--test" # test mode
+
+universe               = vanilla
+Executable             = shell
+should_transfer_files  = YES
+when_to_transfer_output= ON_EXIT
+
+transfer_input_files   = shell, run_parking_vbf_eff.sh, parking_vbf_eff.py, infiles
+
+stream_output = True
+stream_error  = True
+
+on_exit_remove   = (ExitBySignal == False) && (ExitCode == 0)
+max_retries      = 3
+
+transfer_output_files  = figures_parking_vbf, output
+transfer_output_remaps = "figures_parking_vbf=parking_vbf_$(YEAR)/figures_parking_vbf;output=parking_vbf_$(YEAR)/output"
+
+request_memory         = 8 GB
+request_cpus           = 2
+
+Output = parking_vbf_$(YEAR)/$(Cluster)_$(Process).out
+Error  = parking_vbf_$(YEAR)/$(Cluster)_$(Process).err
+Log    = parking_vbf_$(YEAR)/$(Cluster)_$(Process).log
+
+Arguments = coffeateam/coffea-dask-almalinux8:2025.10.2-py3.10 bash run_parking_vbf_eff.sh --year $(YEAR) $(TEST_FLAG)
+
+YEAR = 2023
+Queue 1
+
+YEAR = 2023BPix
+Queue 1

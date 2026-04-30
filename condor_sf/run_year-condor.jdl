@@ -1,0 +1,52 @@
+# JDL for running trigger efficiency analyses for a SINGLE period
+# This runs both 2D SF and 1D SF for one period
+#
+# Usage (single job):
+#   condor_submit run_year-condor.jdl YEAR=2022
+#
+# Usage (parallel - all years):
+#   condor_submit run_year-condor.jdl
+#   (This queues 4 jobs, one per period)
+#
+# For test mode:
+#   condor_submit run_year-condor.jdl YEAR=2022 TEST_FLAG="--test"
+
+universe               = vanilla
+Executable             = shell
+should_transfer_files  = YES
+when_to_transfer_output= ON_EXIT
+
+# Transfer all necessary scripts and input files
+transfer_input_files   = shell, run_year_combined.sh, run_sf_2d.sh, run_sf.sh, scale_factor_2d.py, scale_factor.py, infiles
+
+# Stream output for monitoring
+stream_output = True
+stream_error  = True
+
+# Retry on failure
+on_exit_remove   = (ExitBySignal == False) && (ExitCode == 0)
+max_retries      = 3
+
+# Transfer output directories for this year back
+transfer_output_files  = figures_sf_2d, output, sf_$(YEAR)_OR, sf_2d_$(YEAR)
+transfer_output_remaps = "figures_sf_2d=year_$(YEAR)/figures_sf_2d;output=year_$(YEAR)/output;sf_$(YEAR)_OR=year_$(YEAR)/sf_$(YEAR)_OR;sf_2d_$(YEAR)=year_$(YEAR)/sf_2d_$(YEAR)"
+
+# Resource requests
+request_memory         = 8 GB
+request_cpus           = 2
+
+# Output files (logs go to predictable directory year_YEAR/)
+Output                 = year_$(YEAR)/$(Cluster)_$(Process).out
+Error                  = year_$(YEAR)/$(Cluster)_$(Process).err
+Log                    = year_$(YEAR)/$(Cluster)_$(Process).log
+
+# Run both 2D and 1D analyses for this year using wrapper script
+Arguments              = coffeateam/coffea-dask-almalinux8:2025.10.2-py3.10 bash run_year_combined.sh --year $(YEAR) $(TEST_FLAG)
+
+# Submit one job per period (or specify YEAR on command line for single job)
+Queue YEAR from (
+2022
+2022EE
+2023
+2023BPix
+)
