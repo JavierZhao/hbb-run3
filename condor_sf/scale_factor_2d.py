@@ -59,6 +59,40 @@ def ak_clip(arr, min_value, max_value):
     return ak.where(arr < min_value, min_value, ak.where(arr > max_value, max_value, arr))
 
 
+def binomial_eff_err(k, n):
+    """
+    Per-bin statistical uncertainty on a binomial efficiency eff = k/n.
+    Uses the Gaussian approximation: sigma(eff) = sqrt(eff*(1-eff)/n).
+
+    Returns NaN where n == 0. This is the standard "sqrt(N) for binomial counts" form
+    and is more accurate than sqrt(1/k) when eff is far from 0; for very low eff it
+    reduces to the same numerical value.
+    """
+    k = np.asarray(k, dtype=float)
+    n = np.asarray(n, dtype=float)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        eff = np.where(n > 0, k / n, np.nan)
+        err = np.where(n > 0, np.sqrt(np.clip(eff * (1.0 - eff), 0.0, None) / n), np.nan)
+    return eff, err
+
+
+def sf_err_from_counts(k_pass_d, n_base_d, k_pass_m, n_base_m):
+    """
+    Statistical uncertainty on SF = eff_data / eff_mc, propagated assuming independence.
+    sigma(SF) = SF * sqrt((1-eff_d)/k_pass_d + (1-eff_m)/k_pass_m).
+
+    Returns (sf, sf_err) with NaN where any input bin has zero pass or baseline counts.
+    """
+    eff_d, _ = binomial_eff_err(k_pass_d, n_base_d)
+    eff_m, _ = binomial_eff_err(k_pass_m, n_base_m)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        sf  = np.where((eff_m > 0) & np.isfinite(eff_d), eff_d / eff_m, np.nan)
+        rel = np.where(np.asarray(k_pass_d) > 0, (1.0 - eff_d) / np.asarray(k_pass_d), np.nan) \
+            + np.where(np.asarray(k_pass_m) > 0, (1.0 - eff_m) / np.asarray(k_pass_m), np.nan)
+        sf_err = np.where(np.isfinite(sf) & np.isfinite(rel), np.abs(sf) * np.sqrt(np.clip(rel, 0.0, None)), np.nan)
+    return sf, sf_err
+
+
 def get_pog_json(obj, year):
     """Return path to a POG json file for a given object/year."""
     group, filename = POG_JSONS[obj]
@@ -541,6 +575,14 @@ def plot_2d_scale_factors(output_data, output_mc, trig_vars_2d, save_dir=None, y
         # Mask invalid SF bins
         sf[~valid_sf] = np.nan
 
+        # Per-bin statistical uncertainty: binomial Gaussian on each efficiency,
+        # propagated to SF assuming independence.
+        _, sf_unc = sf_err_from_counts(
+            hist_pass_data, hist_baseline_data,
+            hist_pass_mc,   hist_baseline_mc,
+        )
+        sf_unc[~valid_sf] = np.nan
+
         # Calculate total efficiency and SF
         total_pass_data = np.sum(hist_pass_data)
         total_baseline_data = np.sum(hist_baseline_data)
@@ -614,6 +656,40 @@ def plot_2d_scale_factors(output_data, output_mc, trig_vars_2d, save_dir=None, y
 
         plt.close(fig)
 
+        # Companion figure: 2-panel (SF | SF statistical uncertainty)
+        fig_unc, (ax_sf, ax_un) = plt.subplots(1, 2, figsize=(16, 7))
+
+        im_sf = ax_sf.pcolormesh(
+            xedges, yedges, sf.T,
+            cmap='viridis', vmin=0, vmax=1.2, shading='flat',
+        )
+        cb_sf = plt.colorbar(im_sf, ax=ax_sf)
+        cb_sf.set_label('Trigger efficiency scale factor', fontsize=12)
+        ax_sf.set_xlabel(var_info['label_x'], fontsize=12)
+        ax_sf.set_ylabel(var_info['label_y'], fontsize=12)
+        ax_sf.set_title(f"Scale Factor\nOverall: {total_sf:.3f}", fontsize=12)
+        hep.cms.label(ax=ax_sf, data=True, year=year, com="13.6", fontsize=10)
+
+        im_un = ax_un.pcolormesh(
+            xedges, yedges, sf_unc.T,
+            cmap='viridis', vmin=0, vmax=0.1, shading='flat',
+        )
+        cb_un = plt.colorbar(im_un, ax=ax_un)
+        cb_un.set_label('Trigger efficiency scale factor uncertainty', fontsize=12)
+        ax_un.set_xlabel(var_info['label_x'], fontsize=12)
+        ax_un.set_ylabel(var_info['label_y'], fontsize=12)
+        ax_un.set_title("Scale Factor Statistical Uncertainty", fontsize=12)
+        hep.cms.label(ax=ax_un, data=True, year=year, com="13.6", fontsize=10)
+
+        plt.tight_layout()
+        unc_path = os.path.join(save_dir, f"scale_factor_{var_name}_2d_unc.png")
+        plt.savefig(unc_path, dpi=200, bbox_inches='tight')
+        if show_img:
+            plt.show()
+        else:
+            print(f"Saved {unc_path}")
+        plt.close(fig_unc)
+
 
 def plot_1d_efficiency_projections(output_data, output_mc, trig_vars_2d, triggers,
                                    save_dir=None, year='2022', show_img=False,
@@ -652,13 +728,13 @@ def plot_1d_efficiency_projections(output_data, output_mc, trig_vars_2d, trigger
     colors = [prop_cycle[i % len(prop_cycle)] for i in range(len(all_keys))]
 
     def _eff_arrays(output, key, axis, bins, plateau_mask_fn=None):
-        """Return (bin_centers, efficiency) arrays for one trigger key and one axis."""
+        """Return (bin_centers, efficiency, eff_err) arrays for one trigger key and one axis."""
         if key == 'OR':
             pass_x = np.array(output['Numerator'][var_name]['pass_x'])
             pass_y = np.array(output['Numerator'][var_name]['pass_y'])
         else:
             if 'PerTrigger' not in output or key not in output['PerTrigger']:
-                return None, None
+                return None, None, None
             pass_x = np.array(output['PerTrigger'][key][var_name]['pass_x'])
             pass_y = np.array(output['PerTrigger'][key][var_name]['pass_y'])
 
@@ -678,22 +754,22 @@ def plot_1d_efficiency_projections(output_data, output_mc, trig_vars_2d, trigger
             n_base, _ = np.histogram(base_x, bins=bins)
             n_pass, _ = np.histogram(pass_x, bins=bins)
 
-        with np.errstate(divide='ignore', invalid='ignore'):
-            eff = np.where(n_base > 0, n_pass / n_base.astype(float), np.nan)
-
+        eff, err = binomial_eff_err(n_pass, n_base)
         centers = 0.5 * (bins[:-1] + bins[1:])
-        return centers, eff
+        return centers, eff, err
 
     def _draw_panel(ax, output, is_data, axis, bins, plateau_mask_fn=None):
         for i, (key, label) in enumerate(zip(all_keys, all_labels)):
-            centers, eff = _eff_arrays(output, key, axis, bins, plateau_mask_fn)
+            centers, eff, err = _eff_arrays(output, key, axis, bins, plateau_mask_fn)
             if centers is None:
                 continue
-            ls  = '-'
-            mk  = '+' if label == 'Soup' else None
-            mks = 8   if label == 'Soup' else None
-            ax.plot(centers, eff, label=label, color=colors[i],
-                    linestyle=ls, marker=mk, markersize=mks, linewidth=2)
+            mk  = '+' if label == 'Soup' else 'o'
+            mks = 8   if label == 'Soup' else 4
+            ax.errorbar(
+                centers, eff, yerr=err, label=label, color=colors[i],
+                linestyle='-', marker=mk, markersize=mks, linewidth=2,
+                elinewidth=1, capsize=2,
+            )
         ax.axhline(1.0, color='gray', linestyle='--', linewidth=1)
         ax.set_ylim(0, 1.4)
         ax.legend(fontsize=8, loc='lower right', ncol=1)
@@ -797,8 +873,27 @@ def generate_per_trigger_efficiency_csv(output_data, output_mc, trig_vars_2d, tr
 
     # Prepare CSV data
     csv_data = []
-    csv_data.append(['Trigger', 'Data_Efficiency', 'Data_Pass', 'Data_Total',
-                     'MC_Efficiency', 'MC_Pass', 'MC_Total', 'Scale_Factor'])
+    csv_data.append(['Trigger', 'Data_Efficiency', 'Data_Eff_Err', 'Data_Pass', 'Data_Total',
+                     'MC_Efficiency', 'MC_Eff_Err', 'MC_Pass', 'MC_Total',
+                     'Scale_Factor', 'Scale_Factor_Err'])
+
+    def _row(label, k_d, n_d, k_m, n_m):
+        eff_d_arr, err_d_arr = binomial_eff_err(np.array([k_d]), np.array([n_d]))
+        eff_m_arr, err_m_arr = binomial_eff_err(np.array([k_m]), np.array([n_m]))
+        eff_d = float(eff_d_arr[0]) if np.isfinite(eff_d_arr[0]) else 0.0
+        eff_m = float(eff_m_arr[0]) if np.isfinite(eff_m_arr[0]) else 0.0
+        err_d = float(err_d_arr[0]) if np.isfinite(err_d_arr[0]) else 0.0
+        err_m = float(err_m_arr[0]) if np.isfinite(err_m_arr[0]) else 0.0
+        _, sf_err_arr = sf_err_from_counts(np.array([k_d]), np.array([n_d]),
+                                           np.array([k_m]), np.array([n_m]))
+        sf = eff_d / eff_m if eff_m > 0 else 1.0
+        sf_err = float(sf_err_arr[0]) if np.isfinite(sf_err_arr[0]) else 0.0
+        print(f"{label:60s} | Data: {eff_d:.2%} ± {err_d:.2%} ({k_d}/{n_d}) | "
+              f"MC: {eff_m:.2%} ± {err_m:.2%} ({k_m}/{n_m}) | SF: {sf:.4f} ± {sf_err:.4f}")
+        return [label,
+                f"{eff_d:.4f}", f"{err_d:.4f}", f"{k_d}", f"{n_d}",
+                f"{eff_m:.4f}", f"{err_m:.4f}", f"{k_m}", f"{n_m}",
+                f"{sf:.4f}",   f"{sf_err:.4f}"]
 
     # Calculate efficiency for each trigger
     for trigger in triggers:
@@ -818,29 +913,12 @@ def generate_per_trigger_efficiency_csv(output_data, output_mc, trig_vars_2d, tr
         pass_cut_mc = (pass_y_mc >= pt_min) & (pass_y_mc < pt_max) & \
                       (pass_x_mc >= msd_min) & (pass_x_mc < msd_max)
 
-        n_pass_data = np.sum(pass_cut_data)
-        n_pass_mc = np.sum(pass_cut_mc)
+        n_pass_data = int(np.sum(pass_cut_data))
+        n_pass_mc   = int(np.sum(pass_cut_mc))
 
-        # Calculate efficiencies
-        eff_data = n_pass_data / n_baseline_data if n_baseline_data > 0 else 0.0
-        eff_mc = n_pass_mc / n_baseline_mc if n_baseline_mc > 0 else 0.0
-        sf = eff_data / eff_mc if eff_mc > 0 else 1.0
-
-        # Simplify trigger name for display
-        trigger_display = trigger.replace('HLT_', '')
-
-        csv_data.append([
-            trigger_display,
-            f"{eff_data:.4f}",
-            f"{n_pass_data}",
-            f"{n_baseline_data}",
-            f"{eff_mc:.4f}",
-            f"{n_pass_mc}",
-            f"{n_baseline_mc}",
-            f"{sf:.4f}"
-        ])
-
-        print(f"{trigger_display:60s} | Data: {eff_data:.2%} ({n_pass_data}/{n_baseline_data}) | MC: {eff_mc:.2%} ({n_pass_mc}/{n_baseline_mc}) | SF: {sf:.4f}")
+        csv_data.append(_row(trigger.replace('HLT_', ''),
+                             n_pass_data, n_baseline_data,
+                             n_pass_mc,   n_baseline_mc))
 
     # Calculate combined (OR) efficiency
     pass_x_data = np.array(output_data['Numerator'][var_name]['pass_x'])
@@ -853,25 +931,12 @@ def generate_per_trigger_efficiency_csv(output_data, output_mc, trig_vars_2d, tr
     pass_cut_mc = (pass_y_mc >= pt_min) & (pass_y_mc < pt_max) & \
                   (pass_x_mc >= msd_min) & (pass_x_mc < msd_max)
 
-    n_pass_data = np.sum(pass_cut_data)
-    n_pass_mc = np.sum(pass_cut_mc)
+    n_pass_data = int(np.sum(pass_cut_data))
+    n_pass_mc   = int(np.sum(pass_cut_mc))
 
-    eff_data = n_pass_data / n_baseline_data if n_baseline_data > 0 else 0.0
-    eff_mc = n_pass_mc / n_baseline_mc if n_baseline_mc > 0 else 0.0
-    sf = eff_data / eff_mc if eff_mc > 0 else 1.0
-
-    csv_data.append([
-        'Combined (OR)',
-        f"{eff_data:.4f}",
-        f"{n_pass_data}",
-        f"{n_baseline_data}",
-        f"{eff_mc:.4f}",
-        f"{n_pass_mc}",
-        f"{n_baseline_mc}",
-        f"{sf:.4f}"
-    ])
-
-    print(f"{'Combined (OR)':60s} | Data: {eff_data:.2%} ({n_pass_data}/{n_baseline_data}) | MC: {eff_mc:.2%} ({n_pass_mc}/{n_baseline_mc}) | SF: {sf:.4f}")
+    csv_data.append(_row('Combined (OR)',
+                         n_pass_data, n_baseline_data,
+                         n_pass_mc,   n_baseline_mc))
 
     # Write CSV file
     csv_filename = os.path.join(save_dir, f"per_trigger_efficiency_{year}.csv")

@@ -23,7 +23,7 @@ Closure validation: `apply_scale_factors_2d.py`.
 | **Figs 3, 6, 10** — 1D efficiency vs leading-jet pT, data + simulation panels  | ✅ | `figures_sf_2d/<year>/Inclusive/<region>/efficiency_vs_pt.png` |
 | **Figs 4, 7, 11** — 1D efficiency vs leading-jet mSD (pT ≥ 450 GeV plateau)    | ✅ | `figures_sf_2d/<year>/Inclusive/<region>/efficiency_vs_msd.png` |
 | **Figs 5, 8, 12 (left)** — 2D scale-factor map (pT vs mSD)                     | ✅ | `figures_sf_2d/<year>/Inclusive/<region>/scale_factor_pt_vs_msd_2d.png` |
-| **Figs 5, 8, 12 (right)** — statistical-uncertainty map for the 2D SF          | ❌ | not implemented (Clopper-Pearson / sqrt(N) propagation pending) |
+| **Figs 5, 8, 12 (right)** — statistical-uncertainty map for the 2D SF          | ✅ | `figures_sf_2d/<year>/Inclusive/<region>/scale_factor_pt_vs_msd_2d_unc.png`; per-bin `σ(SF) = SF·√((1−ε_d)/k_d + (1−ε_m)/k_m)` (binomial Gaussian, not Clopper-Pearson). Per-bin σ also appears as error bars on the 1D projections and as `*_Err` columns in the per-trigger CSV. |
 | **Fig 9** — efficiency vs DeepDoubleB / Xbb tagger score                       | ❌ | tagger axis not stored in the accumulator |
 
 Plot kinematic axes use the **full range** (`pT 200–1000 GeV`, `mSD 0–300 GeV`) so the
