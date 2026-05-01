@@ -53,6 +53,21 @@ GloParT branches aren't available.
   and avoids the top-like bias in ttbar.
 
 
+## Implementation status — May meeting plan
+
+Beyond the AN reproduction, this is the status of the May methodology-improvement plan:
+
+| # | Item | Status | Where |
+|---|------|:------:|-------|
+| 1 | Apply candidate-jet `pT > 300` and `mSD > 40` baseline cuts before SF calc | ✅ | `create_baseline_selection_mask_new()` in `scale_factor_2d.py` |
+| 2 | AN Sec 5.1 three-region split (`fail` / `pass_bb` / `pass_cc`) | ✅ | `--txbb-region all` runs all three; output paths `figures_sf_2d/<year>/Inclusive/{fail,pass_bb,pass_cc}/` |
+| 3 | 1D distributions of leading-jet pT, mSD, Xbb+Xcc score after baseline + region cuts | ✅ | `baseline_kinematic_distributions.png` (3-panel data vs MC overlay with Data/MC ratio), one per region |
+| 4 | Per-trigger efficiency in each pass/fail region | ✅ | Existing per-trigger and per-era CSVs are emitted once per region (no extra code path needed) |
+| 5 | Try muon-enriched QCD MC instead of ttbar | ✅ | `--mc-sample qcd_muenriched`; infiles for all 4 periods committed (1020/2282/2587/825 files); generator script `make_qcd_muenriched_infiles.py` |
+| 6 | VBF parking trigger SF via Z(μμ) + 2 VBF jets control region (per Tomas's slide 5) | ❌ | not started; `parking_vbf_eff.py` currently only does muon-tag on ParkingVBF, data-only |
+| — | Tagger-branch fallback warning spam (NanoAODv12 vs GloParT v3) | ✅ | auto-detection prints once per worker; TXbbcc now uses AN Eq. 4 form `(Xbb+Xcc)/(Xbb+Xcc+QCD)` |
+
+
 ## How to run
 
 ### Option 1 — full production (HTCondor)
