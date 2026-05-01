@@ -64,7 +64,7 @@ Beyond the AN reproduction, this is the status of the May methodology-improvemen
 | 3 | 1D distributions of leading-jet pT, mSD, Xbb+Xcc score after baseline + region cuts | ✅ | `baseline_kinematic_distributions.png` (3-panel data vs MC overlay with Data/MC ratio), one per region |
 | 4 | Per-trigger efficiency in each pass/fail region | ✅ | Existing per-trigger and per-era CSVs are emitted once per region (no extra code path needed) |
 | 5 | Try muon-enriched QCD MC instead of ttbar | ✅ | `--mc-sample qcd_muenriched`; infiles for all 4 periods committed (1020/2282/2587/825 files); generator script `make_qcd_muenriched_infiles.py` |
-| 6 | VBF parking trigger SF via Z(μμ) + 2 VBF jets control region (per Tomas's slide 5) | ❌ | not started; `parking_vbf_eff.py` currently only does muon-tag on ParkingVBF, data-only |
+| 6 | VBF parking trigger SF via Z(μμ) + 2 VBF jets control region (per Tomas's slide 5) | ✅ | `parking_vbf_eff.py --method zmumu_vbf`: Muon PD data + DYJetsToLL MC; produces 3-panel data/MC/SF maps + a 2-panel SF + uncertainty figure + per-region SF CSV. Legacy `--method mu_tag_parkingvbf` still available. |
 | — | Tagger-branch fallback warning spam (NanoAODv12 vs GloParT v3) | ✅ | auto-detection prints once per worker; TXbbcc now uses AN Eq. 4 form `(Xbb+Xcc)/(Xbb+Xcc+QCD)` |
 
 
