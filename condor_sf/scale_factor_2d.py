@@ -50,8 +50,23 @@ POG_YEARS = {
     "2023BPix": "2023_Summer23BPix",
 }
 
-_TXCC_FALLBACK_WARNED = False
 _JETID_FALLBACK_WARNED = False
+
+# Branch-set detection cache: which tagger we're reading on the current worker.
+# Set on first call, kept silent in subsequent calls so the log isn't spammy.
+_TAGGER_SOURCE_CACHE = None  # one of: 'globalParT3', 'particleNet_v12', 'pnetVsQCD_legacy', 'none'
+
+
+def _detect_tagger_source(fields):
+    """Return a label for which fatjet tagger branches are available."""
+    f = set(fields)
+    if {'globalParT3_Xbb', 'globalParT3_Xcc', 'globalParT3_QCD'}.issubset(f):
+        return 'globalParT3'
+    if {'particleNet_XbbVsQCD', 'particleNet_XccVsQCD', 'particleNet_QCD'}.issubset(f):
+        return 'particleNet_v12'
+    if 'particleNet_XbbVsQCD' in f:
+        return 'pnetVsQCD_legacy'  # only Xbb side; cc not separable
+    return 'none'
 
 
 def ak_clip(arr, min_value, max_value):
@@ -102,25 +117,58 @@ def get_pog_json(obj, year):
 
 def get_txbb_txcc_score(jets):
     """
-    Preferred discriminator for pass/fail split: txbb + txcc.
-    Fallback to particleNet_XbbVsQCD when txbb/txcc branches are unavailable.
-    """
-    global _TXCC_FALLBACK_WARNED
-    fields = set(jets.fields)
-    if "particleNet_Xbb" in fields and "particleNet_Xcc" in fields:
-        xbb = ak.fill_none(jets.particleNet_Xbb, 0.0)
-        xcc = ak.fill_none(jets.particleNet_Xcc, 0.0)
-        return xbb + xcc
+    AN Eq. 4 TXbbcc = (Xbb + Xcc) / (Xbb + Xcc + QCD).
 
-    if "particleNet_XbbVsQCD" in fields:
-        if not _TXCC_FALLBACK_WARNED:
-            print("Warning: particleNet_Xbb/Xcc not found. Falling back to particleNet_XbbVsQCD.")
-            _TXCC_FALLBACK_WARNED = True
+    Branch resolution (in priority):
+      1. globalParT3 raw probabilities (newer Run 3 NanoAOD / private v14+):
+            (globalParT3_Xbb + globalParT3_Xcc) / (Xbb + Xcc + globalParT3_QCD)
+      2. particleNet NanoAODv12 normalized scores, mirroring main-hbb-run3 objects.py:
+            (particleNet_XbbVsQCD + particleNet_XccVsQCD)
+            / (particleNet_XbbVsQCD + particleNet_XccVsQCD + particleNet_QCD)
+      3. Legacy: just particleNet_XbbVsQCD (single-flavor proxy).
+    """
+    global _TAGGER_SOURCE_CACHE
+    if _TAGGER_SOURCE_CACHE is None:
+        _TAGGER_SOURCE_CACHE = _detect_tagger_source(jets.fields)
+        # one-time per worker, terse:
+        print(f"[txbb tagger source] {_TAGGER_SOURCE_CACHE}")
+    src = _TAGGER_SOURCE_CACHE
+
+    if src == 'globalParT3':
+        xbb = ak.fill_none(jets.globalParT3_Xbb, 0.0)
+        xcc = ak.fill_none(jets.globalParT3_Xcc, 0.0)
+        qcd = ak.fill_none(jets.globalParT3_QCD, 0.0)
+        return (xbb + xcc) / (xbb + xcc + qcd + 1e-12)
+
+    if src == 'particleNet_v12':
+        xbb_vs = ak.fill_none(jets.particleNet_XbbVsQCD, 0.0)
+        xcc_vs = ak.fill_none(jets.particleNet_XccVsQCD, 0.0)
+        qcd    = ak.fill_none(jets.particleNet_QCD, 0.0)
+        return (xbb_vs + xcc_vs) / (xbb_vs + xcc_vs + qcd + 1e-12)
+
+    if src == 'pnetVsQCD_legacy':
         return ak.fill_none(jets.particleNet_XbbVsQCD, 0.0)
 
-    if not _TXCC_FALLBACK_WARNED:
-        print("Warning: no txbb/txcc discriminator fields found. Using score=0.")
-        _TXCC_FALLBACK_WARNED = True
+    return ak.zeros_like(jets.pt)
+
+
+def get_xbb_score(jets):
+    """Single-flavour Xbb score for the pass-bb vs pass-cc comparison."""
+    f = set(jets.fields)
+    if 'globalParT3_Xbb' in f:
+        return ak.fill_none(jets.globalParT3_Xbb, 0.0)
+    if 'particleNet_XbbVsQCD' in f:
+        return ak.fill_none(jets.particleNet_XbbVsQCD, 0.0)
+    return ak.zeros_like(jets.pt)
+
+
+def get_xcc_score(jets):
+    """Single-flavour Xcc score for the pass-bb vs pass-cc comparison."""
+    f = set(jets.fields)
+    if 'globalParT3_Xcc' in f:
+        return ak.fill_none(jets.globalParT3_Xcc, 0.0)
+    if 'particleNet_XccVsQCD' in f:
+        return ak.fill_none(jets.particleNet_XccVsQCD, 0.0)
     return ak.zeros_like(jets.pt)
 
 
@@ -248,8 +296,14 @@ muon_triggers = {
 
 def create_baseline_selection_mask_new(events, tag, year, txbb_region='inclusive', use_jetid_correction=True):
     """
-    txbb_region: 'pass'      -> candidatejet (txbb+txcc) >= TXBB_WP (0.82)
-                 'fail'      -> candidatejet (txbb+txcc) <  TXBB_WP (with loose preselection > 0.4)
+    txbb_region: 'fail'      -> candidatejet (Xbb+Xcc) <  TXBB_WP (0.82) [AN Sec 5.1 Fail]
+                 'pass_bb'   -> Xbb+Xcc >= 0.82 AND Xbb > Xcc           [AN Sec 5.1 Pass-bb]
+                 'pass_cc'   -> Xbb+Xcc >= 0.82 AND Xcc > Xbb           [AN Sec 5.1 Pass-cc]
+                 'pass'      -> Xbb+Xcc >= 0.82 (no bb/cc split, back-compat)
+                 'fail_legacy' / 'inclusive' -> no region cut
+
+    Also enforces the analysis baseline on the chosen candidate jet:
+        candidatejet.pt > 300 GeV  AND  candidatejet.msoftdrop > 40 GeV
     """
     n_events = len(events)
     baseline_mask = np.ones(n_events, dtype=bool)
@@ -277,15 +331,29 @@ def create_baseline_selection_mask_new(events, tag, year, txbb_region='inclusive
     candidatejet = candidatejet[:, :2]
     candidate_scores = get_txbb_txcc_score(candidatejet)
     candidatejet = ak.firsts(candidatejet[ak.argmax(candidate_scores, axis=1, keepdims=True)])
-    candidate_score = ak.fill_none(get_txbb_txcc_score(candidatejet), -1)
 
-    # Step 2b: txbb pass/fail split on the candidatejet
-    if txbb_region == 'pass':
-        txbb_cut = candidate_score >= TXBB_WP
-        baseline_mask &= ak.to_numpy(txbb_cut)
+    # Per-event candidate observables (NaN/-1 where no candidate jet exists)
+    candidate_score = ak.fill_none(get_txbb_txcc_score(candidatejet), -1)
+    candidate_xbb   = ak.fill_none(get_xbb_score(candidatejet), -1)
+    candidate_xcc   = ak.fill_none(get_xcc_score(candidatejet), -1)
+    candidate_pt    = ak.fill_none(candidatejet.pt, -1)
+    candidate_msd   = ak.fill_none(candidatejet.msoftdrop, -1)
+
+    # Step 2a: analysis-baseline kinematic cuts on the candidate jet (AN signal-region preselection)
+    kine_mask = (candidate_pt > 300) & (candidate_msd > 40)
+    baseline_mask &= ak.to_numpy(kine_mask)
+
+    # Step 2b: AN Section 5.1 region split on the candidate jet
+    pass_overall = candidate_score >= TXBB_WP
+    if txbb_region == 'pass_bb':
+        baseline_mask &= ak.to_numpy(pass_overall & (candidate_xbb > candidate_xcc))
+    elif txbb_region == 'pass_cc':
+        baseline_mask &= ak.to_numpy(pass_overall & (candidate_xcc > candidate_xbb))
+    elif txbb_region == 'pass':           # back-compat: combined pass region
+        baseline_mask &= ak.to_numpy(pass_overall)
     elif txbb_region == 'fail':
-        txbb_cut = candidate_score < TXBB_WP
-        baseline_mask &= ak.to_numpy(txbb_cut)
+        baseline_mask &= ak.to_numpy(~pass_overall)
+    # 'inclusive' / 'fail_legacy' / anything else -> no extra cut
 
     # Step 3: Optional VBF topology selection
     # NOTE: For trigger SF measurement, use tag='Inclusive' (no VBF cuts)
@@ -852,6 +920,94 @@ def plot_1d_efficiency_projections(output_data, output_mc, trig_vars_2d, trigger
     plt.close(fig)
 
 
+def plot_baseline_kinematic_distributions(output_data, output_mc, save_dir=None,
+                                          year='2022', region='', show_img=False):
+    """
+    Three-panel data vs MC overlay (with Data/MC ratio) of the baseline-jet kinematics
+    after the analysis preselection (pT > 300, mSD > 40) and the chosen AN region cut:
+        - leading FatJet pT
+        - leading FatJet mSD
+        - leading FatJet (Xbb + Xcc) tagger score
+
+    These are the per-event arrays already stored in the Baseline accumulator
+    (no trigger requirement); used to validate that the region split lands
+    where expected (matching the AN Fig 4 spirit).
+    """
+    if save_dir is None:
+        save_dir = "./figures_sf_2d"
+    os.makedirs(save_dir, exist_ok=True)
+
+    var_name = 'pt_vs_msd'
+    if var_name not in output_data.get('Baseline', {}):
+        return
+
+    pt_d   = np.asarray(output_data['Baseline'][var_name].get('y', []))
+    msd_d  = np.asarray(output_data['Baseline'][var_name].get('x', []))
+    sc_d   = np.asarray(output_data['Baseline'][var_name].get('score', []))
+    pt_m   = np.asarray(output_mc['Baseline'][var_name].get('y', []))
+    msd_m  = np.asarray(output_mc['Baseline'][var_name].get('x', []))
+    sc_m   = np.asarray(output_mc['Baseline'][var_name].get('score', []))
+
+    if pt_d.size == 0 or pt_m.size == 0:
+        print(f"  plot_baseline_kinematic_distributions: empty data or MC; skipping.")
+        return
+
+    # MC normalised to data integral so shape comparison is meaningful regardless of cross-section
+    mc_norm = pt_d.size / max(pt_m.size, 1)
+
+    panels = [
+        ('pt',  pt_d,  pt_m,  np.linspace(300, 1500, 25), "Leading jet $p_T$ [GeV]"),
+        ('msd', msd_d, msd_m, np.linspace(40,  300, 27),  "Leading jet $m_{SD}$ [GeV]"),
+        ('score', sc_d, sc_m, np.linspace(0,   1,   21),  "Leading jet $X_{bb} + X_{cc}$"),
+    ]
+
+    fig = plt.figure(figsize=(21, 7))
+    for i, (vname, xd, xm, bins, xlabel) in enumerate(panels):
+        # Two-row gridspec for histogram + ratio
+        gs = fig.add_gridspec(2, 3, height_ratios=[3, 1], hspace=0.05)
+        ax  = fig.add_subplot(gs[0, i])
+        rax = fig.add_subplot(gs[1, i], sharex=ax)
+
+        nd, edges = np.histogram(xd, bins=bins)
+        nm, _     = np.histogram(xm, bins=bins)
+        nm_scaled = nm * mc_norm
+        centers = 0.5 * (edges[:-1] + edges[1:])
+        widths  = np.diff(edges)
+
+        ax.errorbar(centers, nd, yerr=np.sqrt(nd), fmt='o', color='black',
+                    label='Data', markersize=4, capsize=2)
+        ax.bar(centers, nm_scaled, width=widths, color='tab:red', alpha=0.4,
+               label='MC (norm. to data)', edgecolor='tab:red')
+        ax.set_yscale('log')
+        ax.set_ylabel('Events')
+        ax.legend(fontsize=10, loc='upper right')
+        ax.set_title(xlabel, fontsize=11)
+        plt.setp(ax.get_xticklabels(), visible=False)
+        hep.cms.label(ax=ax, data=True, year=year, com="13.6", fontsize=10,
+                      label=f"Preliminary, region={region}")
+
+        with np.errstate(divide='ignore', invalid='ignore'):
+            ratio = np.where(nm_scaled > 0, nd / nm_scaled, np.nan)
+            ratio_err = np.where((nm_scaled > 0) & (nd > 0),
+                                 ratio * np.sqrt(1.0 / np.clip(nd, 1, None) + 1.0 / np.clip(nm, 1, None)),
+                                 np.nan)
+        rax.errorbar(centers, ratio, yerr=ratio_err, fmt='o', color='black',
+                     markersize=4, capsize=2)
+        rax.axhline(1.0, color='gray', linestyle='--', linewidth=1)
+        rax.set_ylim(0, 2)
+        rax.set_xlabel(xlabel)
+        rax.set_ylabel('Data / MC')
+
+    plt.tight_layout()
+    save_path = os.path.join(save_dir, "baseline_kinematic_distributions.png")
+    plt.savefig(save_path, dpi=200, bbox_inches='tight')
+    if show_img:
+        plt.show()
+    else:
+        print(f"Saved {save_path}")
+    plt.close(fig)
+
+
 def plot_efficiency_vs_score(output_data, output_mc, trig_vars_2d, triggers,
                              save_dir=None, year='2022', show_img=False,
                              pt_min_plateau=PT_MIN_AN, msd_min_plateau=MSD_MIN_AN,
@@ -1233,8 +1389,13 @@ if __name__ == "__main__":
                         help="Maximum chunks per dataset in --quick-test mode (default: 2).")
     parser.add_argument('--chunksize', type=int, default=100000,
                         help="Events per chunk for coffea Runner (default: 100000).")
-    parser.add_argument('--txbb-region', choices=['pass', 'fail', 'inclusive', 'all'], default='all',
-                        help="txbb region: 'pass' (>=0.82), 'fail' (<0.82), 'inclusive' (no cut), 'all' (run pass+fail).")
+    parser.add_argument('--txbb-region',
+                        choices=['fail', 'pass_bb', 'pass_cc', 'pass', 'inclusive', 'all'],
+                        default='all',
+                        help="Candidate-jet region (AN Sec 5.1): 'fail' (Xbb+Xcc<0.82), "
+                             "'pass_bb' (>=0.82 AND Xbb>Xcc), 'pass_cc' (>=0.82 AND Xcc>Xbb), "
+                             "'pass' (>=0.82, back-compat combined), 'inclusive' (no region cut), "
+                             "or 'all' which runs the three AN regions {fail, pass_bb, pass_cc}.")
     parser.add_argument('--pt-min', type=float, default=PT_MIN_AN,
                         help=f"Minimum pT [GeV] for per-trigger efficiency CSV calculation (default: {PT_MIN_AN:g}).")
     parser.add_argument('--pt-max', type=float, default=PT_MAX_AN,
@@ -1323,9 +1484,9 @@ if __name__ == "__main__":
     # Trigger SFs are measured inclusively (not separated by production mode)
     prod_modes = ['Inclusive']
 
-    # txbb pass/fail regions
+    # AN Section 5.1 regions
     if args.txbb_region == 'all':
-        txbb_regions = ['pass', 'fail']
+        txbb_regions = ['fail', 'pass_bb', 'pass_cc']
     else:
         txbb_regions = [args.txbb_region]
 
@@ -1479,6 +1640,13 @@ if __name__ == "__main__":
                 show_img=False,
                 pt_min_plateau=pt_min_csv,
                 msd_min_plateau=msd_min_csv,
+            )
+
+            # 1D distributions of leading-jet pT, mSD, TXbb+TXcc after baseline cuts
+            # and the chosen AN region split (data + MC overlay with Data/MC ratio).
+            plot_baseline_kinematic_distributions(
+                output_data, output_mc,
+                save_dir=FIGURES_DIR, year=year, region=txbb_region, show_img=False,
             )
             print(f"\nAll plots saved to {FIGURES_DIR}")
 

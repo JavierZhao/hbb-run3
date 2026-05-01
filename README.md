@@ -30,8 +30,27 @@ Plot kinematic axes use the **full range** (`pT 200–1000 GeV`, `mSD 0–300 Ge
 turn-on stays visible. Table efficiency numbers are still computed in the AN window
 `450 ≤ pT < 1000 GeV, 40 ≤ mSD < 300 GeV`. Both windows are configurable from the CLI.
 
-Beyond the Run 2 AN, the SF measurement is also produced split by candidate-jet
-Xbb+Xcc working point (pass/fail at WP = 0.82) — see `--txbb-region` below.
+**Baseline preselection** on the candidate AK8 jet is `pT > 300 GeV` AND `mSD > 40 GeV`,
+applied before any region cut so the mSD-turn-on region doesn't pollute the denominator.
+
+**Region split** follows the AN Section 5.1 definition (Eq. 4-5 of the analysis note):
+
+| Region    | Definition                                |
+|-----------|-------------------------------------------|
+| `fail`    | TX<sub>bbcc</sub> < 0.82                  |
+| `pass_bb` | TX<sub>bbcc</sub> ≥ 0.82  AND  Xbb > Xcc  |
+| `pass_cc` | TX<sub>bbcc</sub> ≥ 0.82  AND  Xcc > Xbb  |
+
+`--txbb-region all` (the default) runs all three. Tagger source is auto-detected
+per worker: GloParT v3 (`globalParT3_*`, AN-spec) is preferred; falls back to
+NanoAODv12 normalized scores (`particleNet_XbbVsQCD/XccVsQCD/QCD`) when the
+GloParT branches aren't available.
+
+**MC denominator** is selectable via `--mc-sample`:
+- `ttbar` (default, back-compat): `TTtoLNu2Q`
+- `qcd_muenriched`: full `QCD_PT-*_MuEnrichedPt5` set across 12 pT bins, generated
+  by `make_qcd_muenriched_infiles.py`. This is closer to the single-muon data jet mix
+  and avoids the top-like bias in ttbar.
 
 
 ## How to run
