@@ -1514,26 +1514,34 @@ if __name__ == "__main__":
             with open(json_path, 'r') as file:
                 data = json.load(file)
 
-            # Group MuonData files by AN-style era; everything else stays merged.
+            # Group source-keys per era. For MuonData each AN-era (e.g. 2023C) is
+            # one fileset; for everything else (ttbar, QCD_MuEnriched pT-bins) all
+            # sources are merged into a single fileset entry. We keep the
+            # *sub-lists* so test-mode truncation can round-robin across them
+            # and avoid biasing toward the first source key (e.g. lowest pT bin).
             split_by_era = (dataset_type == 'MuonData')
+            era_to_sublists = {}  # era_label -> list of file lists (one per source key)
             if isinstance(file_key, list):
-                era_groups = {}  # era_label -> list of files
                 for k in file_key:
                     s = data.get(k, [])
                     era = _era_from_key(k) if split_by_era else file_key[0]
-                    era_groups.setdefault(era, []).extend(s)
+                    era_to_sublists.setdefault(era, []).append(s)
                     print(f"  + {k}: {len(s)} files (era={era})")
             else:
                 era = _era_from_key(file_key) if split_by_era else dataset_type
-                era_groups = {era: list(data.get(file_key, []))}
+                era_to_sublists = {era: [list(data.get(file_key, []))]}
 
-            for era, samples in era_groups.items():
+            for era, sublists in era_to_sublists.items():
                 if quick_test_mode:
-                    samples = samples[:args.quick_files_per_dataset]
-                    print(f"QUICK TEST MODE [{era}]: Limited to {len(samples)} files")
+                    samples = round_robin_sample_lists(sublists, args.quick_files_per_dataset)
+                    print(f"QUICK TEST MODE [{era}]: round-robin {len(samples)} files "
+                          f"across {len(sublists)} source key(s)")
                 elif test_mode:
-                    samples = samples[:10]
-                    print(f"TEST MODE [{era}]: Limited to {len(samples)} files")
+                    samples = round_robin_sample_lists(sublists, 10)
+                    print(f"TEST MODE [{era}]: round-robin {len(samples)} files "
+                          f"across {len(sublists)} source key(s)")
+                else:
+                    samples = [f for sub in sublists for f in sub]
 
                 if split_by_era:
                     dataset_key = f"{dataset_type}_{year}_{era}"
