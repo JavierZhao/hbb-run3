@@ -1245,6 +1245,10 @@ if __name__ == "__main__":
                         help=f"Maximum mSD [GeV] for per-trigger efficiency CSV calculation (default: {MSD_MAX_AN:g}).")
     parser.add_argument('--disable-jetid-correction', action='store_true',
                         help="Disable correctionlib-based JetID recomputation and use NanoAOD isTight directly.")
+    parser.add_argument('--mc-sample', choices=['ttbar', 'qcd_muenriched'], default='ttbar',
+                        help="MC sample for the SF denominator: 'ttbar' uses TTtoLNu2Q (default; "
+                             "may bias SF low due to top-like jets); 'qcd_muenriched' uses the full "
+                             "QCD_MuEnrichedPt5 PT-binned set (closer match to single-muon data jet mix).")
     parser.add_argument('--outdir', default='.',
                         help="Base output directory. Results are saved under <outdir>/figures_sf_2d and <outdir>/output.")
     args = parser.parse_args()
@@ -1283,17 +1287,38 @@ if __name__ == "__main__":
     print(f"Output base directory: {base_outdir}")
 
     # File dictionaries
-    file_dict_periods = {
-        '2022': {'ttbar': "TTtoLNu2Q", 'MuonData': "Muon_Run2022C"},
-        '2022EE': {'ttbar': "TTtoLNu2Q", 'MuonData': "Muon_Run2022E"},
-        '2023': {'ttbar': "TTtoLNu2Q", 'MuonData': [
+    # Muon dataset keys per period (data side, unchanged by --mc-sample)
+    muon_keys_by_period = {
+        '2022':     "Muon_Run2022C",
+        '2022EE':   "Muon_Run2022E",
+        '2023':     [
             "Muon0_Run2023C-v1", "Muon0_Run2023C-v2", "Muon0_Run2023C-v3", "Muon0_Run2023C-v4",
-            "Muon1_Run2023C-v1", "Muon1_Run2023C-v2", "Muon1_Run2023C-v3", "Muon1_Run2023C-v4"
-        ]},
-        '2023BPix': {'ttbar': "TTtoLNu2Q", 'MuonData': ["Muon0_Run2023D-v1", "Muon0_Run2023D-v2"]}
+            "Muon1_Run2023C-v1", "Muon1_Run2023C-v2", "Muon1_Run2023C-v3", "Muon1_Run2023C-v4",
+        ],
+        '2023BPix': ["Muon0_Run2023D-v1", "Muon0_Run2023D-v2"],
     }
 
-    prod_modes_map = file_dict_periods[year]
+    # MC side: select between ttbar and the QCD_MuEnriched PT-binned set.
+    # For QCD_MuEnriched we read all pT-bin keys directly from the infile JSON.
+    if args.mc_sample == 'ttbar':
+        mc_dataset_type = 'ttbar'
+        mc_file_key = "TTtoLNu2Q"
+    else:  # qcd_muenriched
+        mc_dataset_type = 'QCD_MuEnriched'
+        qcd_json_path = os.path.join(f'infiles/{year}', f"{year}_QCD_MuEnriched.json")
+        if not os.path.exists(qcd_json_path):
+            raise FileNotFoundError(
+                f"--mc-sample qcd_muenriched needs {qcd_json_path}; "
+                "run make_qcd_muenriched_infiles.py after voms-proxy-init."
+            )
+        with open(qcd_json_path) as _f:
+            mc_file_key = list(json.load(_f).keys())
+
+    prod_modes_map = {
+        mc_dataset_type: mc_file_key,
+        'MuonData':      muon_keys_by_period[year],
+    }
+    print(f"MC denominator: {args.mc_sample} ({mc_dataset_type})")
 
     # Trigger SFs are measured inclusively (not separated by production mode)
     prod_modes = ['Inclusive']
@@ -1404,7 +1429,7 @@ if __name__ == "__main__":
                 outputs[dataset_key] = out[0]
 
             data_keys = [k for k in outputs.keys() if 'Muon' in k]
-            mc_key    = next((k for k in outputs.keys() if 'ttbar' in k), None)
+            mc_key    = next((k for k in outputs.keys() if k.startswith(mc_dataset_type)), None)
 
             if not data_keys or mc_key is None:
                 print("Error: Missing data or MC output. Skipping plots.")
