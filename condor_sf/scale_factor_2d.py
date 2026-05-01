@@ -353,19 +353,23 @@ class ScaleFactor2DProcessor(processor.ProcessorABC):
         self.triggers = trigger_dict_periods.get(self.year, [])
         self.muon_triggers = muon_triggers.get(self.year, [])
 
-        # Initialize output using accumulators
+        # Initialize output using accumulators.
+        # 'score' / 'pass_score' carry the leading-FatJet (txbb+txcc) per event,
+        # used downstream for the AN Fig 9 efficiency-vs-tagger-score plot.
         self.output = dict_accumulator({
             'Baseline': dict_accumulator({
                 var_name: dict_accumulator({
                     'x': list_accumulator(),
-                    'y': list_accumulator()
+                    'y': list_accumulator(),
+                    'score': list_accumulator(),
                 })
                 for var_name in trig_vars_2d
             }),
             'Numerator': dict_accumulator({
                 var_name: dict_accumulator({
                     'pass_x': list_accumulator(),
-                    'pass_y': list_accumulator()
+                    'pass_y': list_accumulator(),
+                    'pass_score': list_accumulator(),
                 })
                 for var_name in trig_vars_2d
             }),
@@ -373,7 +377,8 @@ class ScaleFactor2DProcessor(processor.ProcessorABC):
                 trigger: dict_accumulator({
                     var_name: dict_accumulator({
                         'pass_x': list_accumulator(),
-                        'pass_y': list_accumulator()
+                        'pass_y': list_accumulator(),
+                        'pass_score': list_accumulator(),
                     })
                     for var_name in trig_vars_2d
                 })
@@ -415,6 +420,22 @@ class ScaleFactor2DProcessor(processor.ProcessorABC):
             var_y = var_info['proc_y'](events)
             variables[var_name] = {'x': var_x, 'y': var_y}
 
+        # Compute leading-FatJet (txbb+txcc) score per event for the AN Fig 9
+        # efficiency-vs-tagger-score projection. Mirrors the candidate-jet
+        # selection used inside create_baseline_selection_mask_new (without
+        # the txbb pass/fail cut, since that is what we plot against).
+        fatjets = events.FatJet
+        fatjet_tight = corrected_jetid_tight_mask(
+            fatjets, jet_type="AK8", year=self.year,
+            use_jetid_correction=self.use_jetid_correction,
+        )
+        cand = fatjets[
+            (fatjets.pt > 200) & (abs(fatjets.eta) < 2.5) & fatjet_tight
+        ][:, :2]
+        cand_scores = get_txbb_txcc_score(cand)
+        cand_lead = ak.firsts(cand[ak.argmax(cand_scores, axis=1, keepdims=True)])
+        score_arr = ak.to_numpy(ak.fill_none(get_txbb_txcc_score(cand_lead), np.nan))
+
         # Create a valid mask where all variables are not NaN
         valid_vars_mask = np.ones(len(events), dtype=bool)
         for var_data in variables.values():
@@ -434,6 +455,7 @@ class ScaleFactor2DProcessor(processor.ProcessorABC):
 
             output['Baseline'][var_name]['x'].extend(ak.to_numpy(var_x_baseline).tolist())
             output['Baseline'][var_name]['y'].extend(ak.to_numpy(var_y_baseline).tolist())
+            output['Baseline'][var_name]['score'].extend(score_arr[selection_baseline].tolist())
 
         # Build numerator from the OR of all HLT triggers configured for this year
         if len(self.triggers) > 0:
@@ -457,6 +479,7 @@ class ScaleFactor2DProcessor(processor.ProcessorABC):
 
             output['Numerator'][var_name]['pass_x'].extend(ak.to_numpy(var_x_pass).tolist())
             output['Numerator'][var_name]['pass_y'].extend(ak.to_numpy(var_y_pass).tolist())
+            output['Numerator'][var_name]['pass_score'].extend(score_arr[selection_pass].tolist())
 
         # Fill per-trigger histograms
         for trigger in self.triggers:
@@ -474,6 +497,9 @@ class ScaleFactor2DProcessor(processor.ProcessorABC):
 
                     output['PerTrigger'][trigger][var_name]['pass_x'].extend(ak.to_numpy(var_x_pass).tolist())
                     output['PerTrigger'][trigger][var_name]['pass_y'].extend(ak.to_numpy(var_y_pass).tolist())
+                    output['PerTrigger'][trigger][var_name]['pass_score'].extend(
+                        score_arr[selection_pass_single].tolist()
+                    )
 
         return output
 
@@ -482,17 +508,22 @@ class ScaleFactor2DProcessor(processor.ProcessorABC):
         for key in accumulator:
             if key == 'Baseline':
                 for var_name in accumulator[key]:
-                    accumulator[key][var_name]['x'] = np.array(accumulator[key][var_name]['x'])
-                    accumulator[key][var_name]['y'] = np.array(accumulator[key][var_name]['y'])
+                    for sub in ('x', 'y', 'score'):
+                        if sub in accumulator[key][var_name]:
+                            accumulator[key][var_name][sub] = np.array(accumulator[key][var_name][sub])
             elif key == 'Numerator':
                 for var_name in accumulator[key]:
-                    accumulator[key][var_name]['pass_x'] = np.array(accumulator[key][var_name]['pass_x'])
-                    accumulator[key][var_name]['pass_y'] = np.array(accumulator[key][var_name]['pass_y'])
+                    for sub in ('pass_x', 'pass_y', 'pass_score'):
+                        if sub in accumulator[key][var_name]:
+                            accumulator[key][var_name][sub] = np.array(accumulator[key][var_name][sub])
             elif key == 'PerTrigger':
                 for trigger in accumulator[key]:
                     for var_name in accumulator[key][trigger]:
-                        accumulator[key][trigger][var_name]['pass_x'] = np.array(accumulator[key][trigger][var_name]['pass_x'])
-                        accumulator[key][trigger][var_name]['pass_y'] = np.array(accumulator[key][trigger][var_name]['pass_y'])
+                        for sub in ('pass_x', 'pass_y', 'pass_score'):
+                            if sub in accumulator[key][trigger][var_name]:
+                                accumulator[key][trigger][var_name][sub] = np.array(
+                                    accumulator[key][trigger][var_name][sub]
+                                )
         return accumulator
 
 
@@ -821,6 +852,241 @@ def plot_1d_efficiency_projections(output_data, output_mc, trig_vars_2d, trigger
     plt.close(fig)
 
 
+def plot_efficiency_vs_score(output_data, output_mc, trig_vars_2d, triggers,
+                             save_dir=None, year='2022', show_img=False,
+                             pt_min_plateau=PT_MIN_AN, msd_min_plateau=MSD_MIN_AN,
+                             score_bins=None):
+    """
+    AN Fig 9 equivalent: per-trigger efficiency in the kinematic plateau as a
+    function of leading-FatJet (txbb+txcc) tagger score.
+
+    Two-panel figure (data left, MC right). Each curve is one trigger; an extra
+    "Soup" curve shows the OR. Plateau cuts pT >= pt_min_plateau and mSD >=
+    msd_min_plateau are applied so the variation reflects tagger-correlation
+    rather than kinematic turn-on.
+    """
+    if save_dir is None:
+        save_dir = "./figures_sf_2d"
+    os.makedirs(save_dir, exist_ok=True)
+
+    var_name = 'pt_vs_msd'
+    if var_name not in trig_vars_2d:
+        return
+    if score_bins is None:
+        score_bins = np.linspace(0, 1, 21)
+
+    trigger_names  = list(triggers)
+    trigger_labels = [t.replace('HLT_', '') for t in trigger_names]
+    all_keys   = trigger_names + ['OR']
+    all_labels = trigger_labels + ['Soup']
+
+    prop_cycle = plt.rcParams['axes.prop_cycle'].by_key()['color']
+    colors = [prop_cycle[i % len(prop_cycle)] for i in range(len(all_keys))]
+
+    def _curves(output, key):
+        if key == 'OR':
+            ps = np.asarray(output['Numerator'][var_name].get('pass_score', []))
+            px = np.asarray(output['Numerator'][var_name].get('pass_x', []))
+            py = np.asarray(output['Numerator'][var_name].get('pass_y', []))
+        else:
+            if 'PerTrigger' not in output or key not in output['PerTrigger']:
+                return None, None, None
+            ps = np.asarray(output['PerTrigger'][key][var_name].get('pass_score', []))
+            px = np.asarray(output['PerTrigger'][key][var_name].get('pass_x', []))
+            py = np.asarray(output['PerTrigger'][key][var_name].get('pass_y', []))
+        bs = np.asarray(output['Baseline'][var_name].get('score', []))
+        bx = np.asarray(output['Baseline'][var_name].get('x', []))
+        by = np.asarray(output['Baseline'][var_name].get('y', []))
+
+        if bs.size == 0:
+            return None, None, None
+
+        plateau_b = (by >= pt_min_plateau) & (bx >= msd_min_plateau) & np.isfinite(bs)
+        plateau_p = (py >= pt_min_plateau) & (px >= msd_min_plateau) & np.isfinite(ps)
+
+        n_b, _ = np.histogram(bs[plateau_b], bins=score_bins)
+        n_p, _ = np.histogram(ps[plateau_p], bins=score_bins)
+        eff, err = binomial_eff_err(n_p, n_b)
+        centers = 0.5 * (score_bins[:-1] + score_bins[1:])
+        return centers, eff, err
+
+    def _draw_panel(ax, output, is_data):
+        for i, (key, label) in enumerate(zip(all_keys, all_labels)):
+            centers, eff, err = _curves(output, key)
+            if centers is None:
+                continue
+            mk  = '+' if label == 'Soup' else 'o'
+            mks = 8   if label == 'Soup' else 4
+            ax.errorbar(
+                centers, eff, yerr=err, label=label, color=colors[i],
+                linestyle='-', marker=mk, markersize=mks, linewidth=2,
+                elinewidth=1, capsize=2,
+            )
+        ax.axhline(1.0, color='gray', linestyle='--', linewidth=1)
+        ax.set_ylim(0, 1.4)
+        ax.set_xlim(score_bins[0], score_bins[-1])
+        ax.legend(fontsize=8, loc='lower right', ncol=1)
+        hep.cms.label(ax=ax, data=is_data, year=year, com="13.6", fontsize=10)
+
+    fig, (ax_d, ax_mc) = plt.subplots(1, 2, figsize=(18, 7))
+    _draw_panel(ax_d,  output_data, is_data=True)
+    _draw_panel(ax_mc, output_mc,   is_data=False)
+    plateau_caption = (f"jet $p_T \\geq {pt_min_plateau:.0f}$, "
+                       f"$m_{{SD}} \\geq {msd_min_plateau:.0f}$")
+    for ax, title in [(ax_d,  f"Triggers ($\\mu$ ref, {plateau_caption})"),
+                      (ax_mc, f"Triggers (MC, {plateau_caption})")]:
+        ax.set_xlabel("Leading jet $X_{bb} + X_{cc}$ score", fontsize=13)
+        ax.set_ylabel("Trigger Efficiency", fontsize=13)
+        ax.set_title(title, fontsize=11)
+    plt.tight_layout()
+    save_path = os.path.join(save_dir, "efficiency_vs_score.png")
+    plt.savefig(save_path, dpi=200, bbox_inches='tight')
+    if show_img:
+        plt.show()
+    else:
+        print(f"Saved {save_path}")
+    plt.close(fig)
+
+
+def _era_from_key(file_key):
+    """Map a MuonData file key to an AN-style era label.
+
+    Examples:
+      'Muon0_Run2023C-v3' -> '2023C'
+      'Muon_Run2022E'     -> '2022E'
+      'Muon_Run2022C'     -> '2022C'
+    Falls back to the original key if no Run<YYYY><ERA> pattern is found.
+    """
+    import re
+    m = re.search(r'Run(\d{4})([A-Z])', file_key)
+    if m:
+        return f"{m.group(1)}{m.group(2)}"
+    return file_key
+
+
+def merge_data_outputs(per_era_outputs):
+    """
+    Concatenate per-era data accumulator dicts into a single combined output,
+    so the downstream 2D / 1D plotting functions can run unchanged.
+    """
+    if len(per_era_outputs) == 0:
+        return None
+    if len(per_era_outputs) == 1:
+        return next(iter(per_era_outputs.values()))
+
+    keys = list(per_era_outputs.keys())
+    template = per_era_outputs[keys[0]]
+    merged = {
+        'Baseline':  {vn: {sub: [] for sub in template['Baseline'][vn]}  for vn in template['Baseline']},
+        'Numerator': {vn: {sub: [] for sub in template['Numerator'][vn]} for vn in template['Numerator']},
+        'PerTrigger': {
+            trig: {vn: {sub: [] for sub in template['PerTrigger'][trig][vn]}
+                   for vn in template['PerTrigger'][trig]}
+            for trig in template['PerTrigger']
+        },
+    }
+    for k in keys:
+        out = per_era_outputs[k]
+        for vn in out['Baseline']:
+            for sub in out['Baseline'][vn]:
+                merged['Baseline'][vn][sub].append(np.asarray(out['Baseline'][vn][sub]))
+        for vn in out['Numerator']:
+            for sub in out['Numerator'][vn]:
+                merged['Numerator'][vn][sub].append(np.asarray(out['Numerator'][vn][sub]))
+        for trig in out['PerTrigger']:
+            for vn in out['PerTrigger'][trig]:
+                for sub in out['PerTrigger'][trig][vn]:
+                    merged['PerTrigger'][trig][vn][sub].append(
+                        np.asarray(out['PerTrigger'][trig][vn][sub])
+                    )
+    # concatenate
+    for vn in merged['Baseline']:
+        for sub in merged['Baseline'][vn]:
+            merged['Baseline'][vn][sub] = np.concatenate(merged['Baseline'][vn][sub]) \
+                if merged['Baseline'][vn][sub] else np.array([])
+    for vn in merged['Numerator']:
+        for sub in merged['Numerator'][vn]:
+            merged['Numerator'][vn][sub] = np.concatenate(merged['Numerator'][vn][sub]) \
+                if merged['Numerator'][vn][sub] else np.array([])
+    for trig in merged['PerTrigger']:
+        for vn in merged['PerTrigger'][trig]:
+            for sub in merged['PerTrigger'][trig][vn]:
+                merged['PerTrigger'][trig][vn][sub] = np.concatenate(merged['PerTrigger'][trig][vn][sub]) \
+                    if merged['PerTrigger'][trig][vn][sub] else np.array([])
+    return merged
+
+
+def generate_per_era_efficiency_csv(per_era_data, output_mc, trig_vars_2d, triggers,
+                                     save_dir=None, year='2022',
+                                     pt_min=450, pt_max=1000, msd_min=0, msd_max=300):
+    """
+    Write an AN-style table (Tables 2-4 layout): one row per trigger,
+    one column per data era plus a final 'MC' column. Cells are efficiencies
+    in the AN kinematic window. Companion '_Err' table is written alongside.
+
+    per_era_data : {era_label: data accumulator dict}, e.g. {'2023C': {...}}
+    """
+    if save_dir is None:
+        save_dir = "./output"
+    os.makedirs(save_dir, exist_ok=True)
+
+    import csv
+    var_name = 'pt_vs_msd'
+    if var_name not in trig_vars_2d:
+        return
+
+    eras = sorted(per_era_data.keys())
+
+    def _eff_err_in_window(out, trigger):
+        """Return (eff, err, k_pass, n_base) integrated over the AN window."""
+        bx = np.asarray(out['Baseline'][var_name]['x'])
+        by = np.asarray(out['Baseline'][var_name]['y'])
+        base_cut = (by >= pt_min) & (by < pt_max) & (bx >= msd_min) & (bx < msd_max)
+        n_base = int(np.sum(base_cut))
+
+        if trigger == 'OR':
+            px = np.asarray(out['Numerator'][var_name]['pass_x'])
+            py = np.asarray(out['Numerator'][var_name]['pass_y'])
+        else:
+            if 'PerTrigger' not in out or trigger not in out['PerTrigger']:
+                return 0.0, 0.0, 0, n_base
+            px = np.asarray(out['PerTrigger'][trigger][var_name]['pass_x'])
+            py = np.asarray(out['PerTrigger'][trigger][var_name]['pass_y'])
+        pass_cut = (py >= pt_min) & (py < pt_max) & (px >= msd_min) & (px < msd_max)
+        k_pass = int(np.sum(pass_cut))
+        eff_arr, err_arr = binomial_eff_err(np.array([k_pass]), np.array([n_base]))
+        eff = float(eff_arr[0]) if np.isfinite(eff_arr[0]) else 0.0
+        err = float(err_arr[0]) if np.isfinite(err_arr[0]) else 0.0
+        return eff, err, k_pass, n_base
+
+    rows_eff = [['Trigger'] + eras + ['MC']]
+    rows_err = [['Trigger'] + eras + ['MC']]
+
+    trigger_keys = list(triggers) + ['OR']
+    for trig in trigger_keys:
+        label = 'Combined (OR)' if trig == 'OR' else trig.replace('HLT_', '')
+        eff_row = [label]
+        err_row = [label]
+        for era in eras:
+            eff, err, _, _ = _eff_err_in_window(per_era_data[era], trig)
+            eff_row.append(f"{eff:.4f}")
+            err_row.append(f"{err:.4f}")
+        eff_mc, err_mc, _, _ = _eff_err_in_window(output_mc, trig)
+        eff_row.append(f"{eff_mc:.4f}")
+        err_row.append(f"{err_mc:.4f}")
+        rows_eff.append(eff_row)
+        rows_err.append(err_row)
+
+    eff_path = os.path.join(save_dir, f"per_era_efficiency_{year}.csv")
+    err_path = os.path.join(save_dir, f"per_era_efficiency_{year}_err.csv")
+    with open(eff_path, 'w', newline='') as f:
+        csv.writer(f).writerows(rows_eff)
+    with open(err_path, 'w', newline='') as f:
+        csv.writer(f).writerows(rows_err)
+    print(f"Saved per-era efficiency table to: {eff_path}")
+    print(f"Saved per-era efficiency error  to: {err_path}")
+
+
 def generate_per_trigger_efficiency_csv(output_data, output_mc, trig_vars_2d, triggers, save_dir=None, year='2022', pt_min=450, pt_max=1000, msd_min=0, msd_max=300):
     """
     Generate CSV files with per-trigger efficiencies for data and MC.
@@ -1044,8 +1310,12 @@ if __name__ == "__main__":
             print(f"Measuring trigger SF: {prod_mode}, txbb={txbb_region} (WP={TXBB_WP})")
             print(f"{'='*60}\n")
 
-        # Load fileset once per period (shared across txbb regions)
+        # Load fileset once per period (shared across txbb regions).
+        # MuonData with multiple keys is split by AN-style era (e.g. 2023C) so
+        # the per-era CSV (Tables 2-4 layout) can be produced downstream.
         fileset = {}
+        # Map fileset key -> era label, for per-era CSV (only populated for MuonData).
+        era_lookup = {}
 
         for dataset_type, file_key in prod_modes_map.items():
             json_path = os.path.join(f'infiles/{year}', f"{year}_{dataset_type}.json")
@@ -1058,40 +1328,34 @@ if __name__ == "__main__":
             with open(json_path, 'r') as file:
                 data = json.load(file)
 
-            # file_key can be a string or list of strings (to combine multiple run versions)
+            # Group MuonData files by AN-style era; everything else stays merged.
+            split_by_era = (dataset_type == 'MuonData')
             if isinstance(file_key, list):
-                samples_by_key = []
+                era_groups = {}  # era_label -> list of files
                 for k in file_key:
                     s = data.get(k, [])
-                    samples_by_key.append(s)
-                    print(f"  + {k}: {len(s)} files")
-                samples = [x for sub in samples_by_key for x in sub]
+                    era = _era_from_key(k) if split_by_era else file_key[0]
+                    era_groups.setdefault(era, []).extend(s)
+                    print(f"  + {k}: {len(s)} files (era={era})")
             else:
-                samples = data.get(file_key, [])
+                era = _era_from_key(file_key) if split_by_era else dataset_type
+                era_groups = {era: list(data.get(file_key, []))}
 
-            if quick_test_mode:
-                if isinstance(file_key, list):
-                    samples = round_robin_sample_lists(samples_by_key, args.quick_files_per_dataset)
-                    print(
-                        "QUICK TEST MODE: Round-robin sampled "
-                        f"{len(samples)} files across {len(file_key)} keys"
-                    )
-                else:
+            for era, samples in era_groups.items():
+                if quick_test_mode:
                     samples = samples[:args.quick_files_per_dataset]
-                    print(f"QUICK TEST MODE: Limited to {len(samples)} files")
-            elif test_mode and isinstance(file_key, list):
-                samples = round_robin_sample_lists(samples_by_key, 10)
-                print(
-                    "TEST MODE: Round-robin sampled "
-                    f"{len(samples)} files across {len(file_key)} keys"
-                )
-            elif test_mode:
-                samples = samples[:10]
-                print(f"TEST MODE: Limited to {len(samples)} files")
+                    print(f"QUICK TEST MODE [{era}]: Limited to {len(samples)} files")
+                elif test_mode:
+                    samples = samples[:10]
+                    print(f"TEST MODE [{era}]: Limited to {len(samples)} files")
 
-            dataset_key = f"{dataset_type}_{year}"
-            fileset[dataset_key] = samples
-            print(f"Loaded {len(samples)} files for dataset '{dataset_key}'")
+                if split_by_era:
+                    dataset_key = f"{dataset_type}_{year}_{era}"
+                    era_lookup[dataset_key] = era
+                else:
+                    dataset_key = f"{dataset_type}_{year}"
+                fileset[dataset_key] = samples
+                print(f"Loaded {len(samples)} files for dataset '{dataset_key}'")
 
         if len(fileset) == 0:
             print(f"Error: No data loaded for production mode {prod_mode}")
@@ -1139,15 +1403,19 @@ if __name__ == "__main__":
                 )
                 outputs[dataset_key] = out[0]
 
-            data_key = [k for k in outputs.keys() if 'Muon' in k][0] if any('Muon' in k for k in outputs.keys()) else None
-            mc_key   = [k for k in outputs.keys() if 'ttbar' in k][0] if any('ttbar' in k for k in outputs.keys()) else None
+            data_keys = [k for k in outputs.keys() if 'Muon' in k]
+            mc_key    = next((k for k in outputs.keys() if 'ttbar' in k), None)
 
-            if data_key is None or mc_key is None:
+            if not data_keys or mc_key is None:
                 print("Error: Missing data or MC output. Skipping plots.")
                 continue
 
-            output_data = outputs[data_key]
-            output_mc   = outputs[mc_key]
+            output_mc = outputs[mc_key]
+            # Per-era data outputs (for AN-style table); fall back to a single
+            # implicit "data" key when MuonData wasn't split by era.
+            per_era_data = {era_lookup.get(k, 'data'): outputs[k] for k in data_keys}
+            # Merge across eras for the 2D / 1D plots, which are integrated over the period.
+            output_data = merge_data_outputs(per_era_data) if len(per_era_data) > 1 else next(iter(per_era_data.values()))
 
             # Output paths include txbb_region
             FIGURES_DIR = os.path.join(figures_base_dir, year, prod_mode, txbb_region)
@@ -1176,6 +1444,17 @@ if __name__ == "__main__":
                 pt_min_plateau=pt_min_csv,
                 msd_min_plot=msd_min_csv,
             )
+
+            # AN Fig 9 equivalent: per-trigger eff vs leading-jet (txbb+txcc) score
+            plot_efficiency_vs_score(
+                output_data, output_mc, trig_vars_2d,
+                triggers=trigger_dict_periods[year],
+                save_dir=FIGURES_DIR,
+                year=year,
+                show_img=False,
+                pt_min_plateau=pt_min_csv,
+                msd_min_plateau=msd_min_csv,
+            )
             print(f"\nAll plots saved to {FIGURES_DIR}")
 
             csv_output_dir = os.path.join(output_base_dir, year, prod_mode, txbb_region)
@@ -1191,6 +1470,20 @@ if __name__ == "__main__":
                 msd_min=msd_min_csv,
                 msd_max=msd_max_csv
             )
+
+            # AN Tables 2-4 equivalent: per-era columns + MC column.
+            # Only meaningful when MuonData was split by era (i.e., at least one era key).
+            if len(per_era_data) >= 1:
+                generate_per_era_efficiency_csv(
+                    per_era_data, output_mc, trig_vars_2d,
+                    triggers=trigger_dict_periods[year],
+                    save_dir=csv_output_dir,
+                    year=f"{year}_{prod_mode}_{txbb_region}",
+                    pt_min=pt_min_csv,
+                    pt_max=pt_max_csv,
+                    msd_min=msd_min_csv,
+                    msd_max=msd_max_csv,
+                )
 
     print(f"\n{'='*60}")
     print(f"Completed processing for all production modes")

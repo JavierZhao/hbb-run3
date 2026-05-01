@@ -19,12 +19,12 @@ Closure validation: `apply_scale_factors_2d.py`.
 
 | Run 2 AN element                                         | Run 3 status | Where                                                                     |
 |----------------------------------------------------------|:---:|---------------------------------------------------------------------------------------|
-| **Tables 2-4** — per-trigger efficiency (450 ≤ pT < 1000 GeV, 40 ≤ mSD < 300 GeV) | ⚠️ partial | One CSV per period in `output/per_trigger_efficiency_<year>_*.csv`. Run 3 CSV is integrated over the period — **per-era column split** (e.g. 2022C / 2022D / MC) is **not yet implemented** |
+| **Tables 2-4** — per-trigger efficiency (450 ≤ pT < 1000 GeV, 40 ≤ mSD < 300 GeV) | ✅ | Two CSVs per period: `per_trigger_efficiency_<year>_*.csv` (period-integrated, with σ columns) and `per_era_efficiency_<year>_*.csv` (AN-style: rows = triggers, columns = data eras + MC). Companion `*_err.csv` carries the per-cell σ. |
 | **Figs 3, 6, 10** — 1D efficiency vs leading-jet pT, data + simulation panels  | ✅ | `figures_sf_2d/<year>/Inclusive/<region>/efficiency_vs_pt.png` |
 | **Figs 4, 7, 11** — 1D efficiency vs leading-jet mSD (pT ≥ 450 GeV plateau)    | ✅ | `figures_sf_2d/<year>/Inclusive/<region>/efficiency_vs_msd.png` |
 | **Figs 5, 8, 12 (left)** — 2D scale-factor map (pT vs mSD)                     | ✅ | `figures_sf_2d/<year>/Inclusive/<region>/scale_factor_pt_vs_msd_2d.png` |
 | **Figs 5, 8, 12 (right)** — statistical-uncertainty map for the 2D SF          | ✅ | `figures_sf_2d/<year>/Inclusive/<region>/scale_factor_pt_vs_msd_2d_unc.png`; per-bin `σ(SF) = SF·√((1−ε_d)/k_d + (1−ε_m)/k_m)` (binomial Gaussian, not Clopper-Pearson). Per-bin σ also appears as error bars on the 1D projections and as `*_Err` columns in the per-trigger CSV. |
-| **Fig 9** — efficiency vs DeepDoubleB / Xbb tagger score                       | ❌ | tagger axis not stored in the accumulator |
+| **Fig 9** — efficiency vs leading-jet (X<sub>bb</sub>+X<sub>cc</sub>) tagger score | ✅ | `figures_sf_2d/<year>/Inclusive/<region>/efficiency_vs_score.png`; data + MC two-panel, with the kinematic plateau cut applied. |
 
 Plot kinematic axes use the **full range** (`pT 200–1000 GeV`, `mSD 0–300 GeV`) so the
 turn-on stays visible. Table efficiency numbers are still computed in the AN window
