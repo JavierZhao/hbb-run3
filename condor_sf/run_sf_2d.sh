@@ -53,6 +53,20 @@ echo ">>> Log: ${LOGFILE}"
 
 set -x
 "${PYTHON_BIN}" "${SCRIPT_DIR}/scale_factor_2d.py" --year "${YEAR}" ${TEST_MODE} ${MC_SAMPLE} ${TXBB_REGION} 2>&1 | tee "${LOGFILE}"
+PYRC=${PIPESTATUS[0]}
 set +x
+
+# Build the summary doc as the last step of the job.
+# `pip install --user markdown` is a small pure-Python wheel (no system deps);
+# if no network is available the script still emits summary.md without HTML.
+if [[ "${PYRC}" -eq 0 ]] && [[ -d "figures_sf_2d" ]]; then
+  echo ">>> Building summary index ..."
+  "${PYTHON_BIN}" -m pip install --user --quiet markdown 2>/dev/null || \
+    echo ">>> (python-markdown unavailable; will emit summary.md only, no HTML)"
+  "${PYTHON_BIN}" "${SCRIPT_DIR}/summarize_outputs.py" \
+    --base-outdir . \
+    --out figures_sf_2d/summary.md \
+    --pdf 2>&1 | tee -a "${LOGFILE}"
+fi
 
 echo ">>> Done. Processed both VBF and ggF production modes for data and MC."

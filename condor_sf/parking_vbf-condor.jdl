@@ -10,7 +10,7 @@ Executable             = shell
 should_transfer_files  = YES
 when_to_transfer_output= ON_EXIT
 
-transfer_input_files   = shell, run_parking_vbf_eff.sh, parking_vbf_eff.py, infiles
+transfer_input_files   = shell, run_parking_vbf_eff.sh, parking_vbf_eff.py, summarize_outputs.py, infiles
 
 stream_output = True
 stream_error  = True
