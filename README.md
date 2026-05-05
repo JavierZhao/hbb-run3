@@ -80,28 +80,60 @@ From inside `condor_sf/`:
 ```bash
 cd /uscms/home/zzhao2/nobackup/hbb-run3/condor_sf
 
-# Per-period jobs. Submit each year separately, or all in one batch.
-condor_submit sf_2d-condor.jdl YEAR=2022
-condor_submit sf_2d-condor.jdl YEAR=2022EE
-condor_submit sf_2d-condor.jdl YEAR=2023
-condor_submit sf_2d-condor.jdl YEAR=2023BPix
+# All four periods, both MCs (ttbar + qcd_muenriched), all three regions
+# (fail / pass_bb / pass_cc) — defaults are MC_SAMPLE=both, TXBB_REGION=all.
+for Y in 2022 2022EE 2023 2023BPix; do
+  condor_submit sf_2d-condor.jdl YEAR=$Y
+done
 
-# Equivalent for signal-MC trigger efficiency
-condor_submit trig_eff_2d-condor.jdl YEAR=2023
+# Restrict to one MC sample (for a quick comparison run):
+condor_submit sf_2d-condor.jdl YEAR=2023 MC_SAMPLE=qcd_muenriched
+# Restrict to one region:
+condor_submit sf_2d-condor.jdl YEAR=2023 TXBB_REGION=pass_bb
 
-# ParkingVBF (2023 + 2023BPix queued from one submit)
+# Signal-MC trigger efficiency (separate pipeline, single per-year submission):
+for Y in 2022 2022EE 2023 2023BPix; do
+  condor_submit trig_eff_2d-condor.jdl YEAR=$Y
+done
+
+# VBF parking SF via Z(μμ) + 2 VBF jets (2023 + 2023BPix only).
+# Default --method zmumu_vbf inside the wrapper.
 condor_submit parking_vbf-condor.jdl
 ```
 
 Outputs land in `condor_sf/sf_2d_<YEAR>/{output, figures_sf_2d}/` (and equivalent for the
-other pipelines). Monitor with `condor_q` and `tail -f sf_2d_<YEAR>/*.out`.
+other pipelines). The new layout is:
 
-The JDLs use the `coffeateam/coffea-dask-almalinux8:2025.10.2-py3.10` apptainer image.
-After the job finishes, run the closure step locally:
+```
+sf_2d_<YEAR>/
+├── figures_sf_2d/<YEAR>/Inclusive/{fail,pass_bb,pass_cc}/{ttbar,qcd_muenriched}/*.png
+├── output/<YEAR>/Inclusive/{fail,pass_bb,pass_cc}/{ttbar,qcd_muenriched}/*.csv
+└── output/sf_2d_<YEAR>_Inclusive_<region>_<mc>_{data,mc}.coffea
+```
+
+Monitor with `condor_q` and `tail -f sf_2d_<YEAR>/*.out`. The JDLs use
+`coffeateam/coffea-dask-almalinux8:2025.10.2-py3.10`. After the jobs finish, run the
+closure step locally:
 
 ```bash
 python apply_scale_factors_2d.py --year 2023
 ```
+
+### Building the summary document
+
+After the condor jobs return, walk the output tree and produce a single Markdown index
+of every figure and table (and an HTML rendering you can print to PDF):
+
+```bash
+cd /uscms/home/zzhao2/nobackup/hbb-run3/condor_sf
+# Pure Python; the HTML fallback needs `pip install --user markdown` (one-time).
+python3 summarize_outputs.py --base-outdir sf_2d_2023 --pdf
+```
+
+Outputs `sf_2d_2023/summary.md` and `sf_2d_2023/summary.html`. The script also looks
+for `figures_parking_vbf/` if present, so a single run picks up both pipelines'
+results. PDF: if `pandoc` is available it's used directly; otherwise the HTML output
+renders the same content with embedded CSS and page-break hints for "Print → Save as PDF".
 
 ### Option 2 — quick interactive test
 
