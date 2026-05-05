@@ -1,6 +1,9 @@
 # Template JDL for 2D scale factor analysis
-# To use: condor_submit sf_2d-condor.jdl YEAR=2023
-# Or use the submit_sf_2d.sh wrapper script
+# Examples:
+#   condor_submit sf_2d-condor.jdl YEAR=2023
+#   condor_submit sf_2d-condor.jdl YEAR=2023 MC_SAMPLE=qcd_muenriched
+#   condor_submit sf_2d-condor.jdl YEAR=2023 MC_SAMPLE=qcd_muenriched TXBB_REGION=all
+# Defaults if unset: MC_SAMPLE=ttbar, TXBB_REGION=all (= fail+pass_bb+pass_cc).
 
 universe               = vanilla
 Executable             = shell
@@ -21,5 +24,9 @@ Output                 = sf_2d_$(YEAR)/$(Cluster)_$(Process).out
 Error                  = sf_2d_$(YEAR)/$(Cluster)_$(Process).err
 Log                    = sf_2d_$(YEAR)/$(Cluster)_$(Process).log
 
-Arguments              = coffeateam/coffea-dask-almalinux8:2025.10.2-py3.10 bash run_sf_2d.sh --year $(YEAR)
+# Defaults so condor_submit without these vars still works.
+MC_SAMPLE   = ttbar
+TXBB_REGION = all
+
+Arguments              = coffeateam/coffea-dask-almalinux8:2025.10.2-py3.10 bash run_sf_2d.sh --year $(YEAR) --mc-sample $(MC_SAMPLE) --txbb-region $(TXBB_REGION)
 Queue 1
