@@ -1406,10 +1406,12 @@ if __name__ == "__main__":
                         help=f"Maximum mSD [GeV] for per-trigger efficiency CSV calculation (default: {MSD_MAX_AN:g}).")
     parser.add_argument('--disable-jetid-correction', action='store_true',
                         help="Disable correctionlib-based JetID recomputation and use NanoAOD isTight directly.")
-    parser.add_argument('--mc-sample', choices=['ttbar', 'qcd_muenriched'], default='ttbar',
-                        help="MC sample for the SF denominator: 'ttbar' uses TTtoLNu2Q (default; "
-                             "may bias SF low due to top-like jets); 'qcd_muenriched' uses the full "
-                             "QCD_MuEnrichedPt5 PT-binned set (closer match to single-muon data jet mix).")
+    parser.add_argument('--mc-sample', choices=['ttbar', 'qcd_muenriched', 'both'], default='both',
+                        help="MC sample for the SF denominator. 'ttbar' uses TTtoLNu2Q (may bias "
+                             "SF low due to top-like jets); 'qcd_muenriched' uses the full "
+                             "QCD_MuEnrichedPt5 PT-binned set (closer match to single-muon data "
+                             "jet mix); 'both' (default) runs both in sequence and writes the two "
+                             "result trees side-by-side under <mc_sample>/ subdirectories.")
     parser.add_argument('--outdir', default='.',
                         help="Base output directory. Results are saved under <outdir>/figures_sf_2d and <outdir>/output.")
     args = parser.parse_args()
@@ -1459,27 +1461,26 @@ if __name__ == "__main__":
         '2023BPix': ["Muon0_Run2023D-v1", "Muon0_Run2023D-v2"],
     }
 
-    # MC side: select between ttbar and the QCD_MuEnriched PT-binned set.
-    # For QCD_MuEnriched we read all pT-bin keys directly from the infile JSON.
-    if args.mc_sample == 'ttbar':
-        mc_dataset_type = 'ttbar'
-        mc_file_key = "TTtoLNu2Q"
-    else:  # qcd_muenriched
-        mc_dataset_type = 'QCD_MuEnriched'
-        qcd_json_path = os.path.join(f'infiles/{year}', f"{year}_QCD_MuEnriched.json")
-        if not os.path.exists(qcd_json_path):
-            raise FileNotFoundError(
-                f"--mc-sample qcd_muenriched needs {qcd_json_path}; "
-                "run make_qcd_muenriched_infiles.py after voms-proxy-init."
-            )
-        with open(qcd_json_path) as _f:
-            mc_file_key = list(json.load(_f).keys())
+    def _resolve_mc_source(mc_sample):
+        """Map --mc-sample value -> (dataset_type for infile JSON, file_key string-or-list)."""
+        if mc_sample == 'ttbar':
+            return 'ttbar', "TTtoLNu2Q"
+        if mc_sample == 'qcd_muenriched':
+            qcd_json_path = os.path.join(f'infiles/{year}', f"{year}_QCD_MuEnriched.json")
+            if not os.path.exists(qcd_json_path):
+                raise FileNotFoundError(
+                    f"--mc-sample qcd_muenriched needs {qcd_json_path}; "
+                    "run make_qcd_muenriched_infiles.py after voms-proxy-init."
+                )
+            with open(qcd_json_path) as _f:
+                return 'QCD_MuEnriched', list(json.load(_f).keys())
+        raise ValueError(f"Unknown mc-sample: {mc_sample}")
 
-    prod_modes_map = {
-        mc_dataset_type: mc_file_key,
-        'MuonData':      muon_keys_by_period[year],
-    }
-    print(f"MC denominator: {args.mc_sample} ({mc_dataset_type})")
+    if args.mc_sample == 'both':
+        mc_samples = ['ttbar', 'qcd_muenriched']
+    else:
+        mc_samples = [args.mc_sample]
+    print(f"MC denominators to process: {mc_samples}")
 
     # Trigger SFs are measured inclusively (not separated by production mode)
     prod_modes = ['Inclusive']
@@ -1490,7 +1491,17 @@ if __name__ == "__main__":
     else:
         txbb_regions = [args.txbb_region]
 
-    for prod_mode in prod_modes:
+    for mc_sample in mc_samples:
+      mc_dataset_type, mc_file_key = _resolve_mc_source(mc_sample)
+      prod_modes_map = {
+          mc_dataset_type: mc_file_key,
+          'MuonData':      muon_keys_by_period[year],
+      }
+      print(f"\n{'#'*60}")
+      print(f"# MC denominator: {mc_sample} ({mc_dataset_type})")
+      print(f"{'#'*60}")
+
+      for prod_mode in prod_modes:
         for txbb_region in txbb_regions:
             print(f"\n{'='*60}")
             print(f"Measuring trigger SF: {prod_mode}, txbb={txbb_region} (WP={TXBB_WP})")
@@ -1611,12 +1622,13 @@ if __name__ == "__main__":
             # Merge across eras for the 2D / 1D plots, which are integrated over the period.
             output_data = merge_data_outputs(per_era_data) if len(per_era_data) > 1 else next(iter(per_era_data.values()))
 
-            # Output paths include txbb_region
-            FIGURES_DIR = os.path.join(figures_base_dir, year, prod_mode, txbb_region)
+            # Output paths include txbb_region AND mc_sample so the ttbar and
+            # qcd_muenriched results live side-by-side without clobbering.
+            FIGURES_DIR = os.path.join(figures_base_dir, year, prod_mode, txbb_region, mc_sample)
             os.makedirs(FIGURES_DIR, exist_ok=True)
 
-            output_path_data = os.path.join(output_base_dir, f"sf_2d_{year}_{prod_mode}_{txbb_region}_data.coffea")
-            output_path_mc   = os.path.join(output_base_dir, f"sf_2d_{year}_{prod_mode}_{txbb_region}_mc.coffea")
+            output_path_data = os.path.join(output_base_dir, f"sf_2d_{year}_{prod_mode}_{txbb_region}_{mc_sample}_data.coffea")
+            output_path_mc   = os.path.join(output_base_dir, f"sf_2d_{year}_{prod_mode}_{txbb_region}_{mc_sample}_mc.coffea")
             os.makedirs(os.path.dirname(output_path_data), exist_ok=True)
 
             util.save(output_data, output_path_data)
@@ -1658,14 +1670,14 @@ if __name__ == "__main__":
             )
             print(f"\nAll plots saved to {FIGURES_DIR}")
 
-            csv_output_dir = os.path.join(output_base_dir, year, prod_mode, txbb_region)
+            csv_output_dir = os.path.join(output_base_dir, year, prod_mode, txbb_region, mc_sample)
             os.makedirs(csv_output_dir, exist_ok=True)
 
             generate_per_trigger_efficiency_csv(
                 output_data, output_mc, trig_vars_2d,
                 triggers=trigger_dict_periods[year],
                 save_dir=csv_output_dir,
-                year=f"{year}_{prod_mode}_{txbb_region}",
+                year=f"{year}_{prod_mode}_{txbb_region}_{mc_sample}",
                 pt_min=pt_min_csv,
                 pt_max=pt_max_csv,
                 msd_min=msd_min_csv,
@@ -1679,7 +1691,7 @@ if __name__ == "__main__":
                     per_era_data, output_mc, trig_vars_2d,
                     triggers=trigger_dict_periods[year],
                     save_dir=csv_output_dir,
-                    year=f"{year}_{prod_mode}_{txbb_region}",
+                    year=f"{year}_{prod_mode}_{txbb_region}_{mc_sample}",
                     pt_min=pt_min_csv,
                     pt_max=pt_max_csv,
                     msd_min=msd_min_csv,

@@ -47,10 +47,13 @@ NanoAODv12 normalized scores (`particleNet_XbbVsQCD/XccVsQCD/QCD`) when the
 GloParT branches aren't available.
 
 **MC denominator** is selectable via `--mc-sample`:
-- `ttbar` (default, back-compat): `TTtoLNu2Q`
+- `ttbar`: `TTtoLNu2Q` (top-like jets — biases SF below 1)
 - `qcd_muenriched`: full `QCD_PT-*_MuEnrichedPt5` set across 12 pT bins, generated
-  by `make_qcd_muenriched_infiles.py`. This is closer to the single-muon data jet mix
-  and avoids the top-like bias in ttbar.
+  by `make_qcd_muenriched_infiles.py`. Closer match to the single-muon data jet mix
+  and avoids the top-like bias.
+- `both` (default): runs ttbar and qcd_muenriched sequentially; results live under
+  `figures_sf_2d/<year>/Inclusive/<region>/<mc_sample>/` so they're side-by-side and
+  can be compared directly.
 
 
 ## Implementation status — May meeting plan

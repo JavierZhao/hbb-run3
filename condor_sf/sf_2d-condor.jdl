@@ -1,9 +1,11 @@
 # Template JDL for 2D scale factor analysis
 # Examples:
-#   condor_submit sf_2d-condor.jdl YEAR=2023
-#   condor_submit sf_2d-condor.jdl YEAR=2023 MC_SAMPLE=qcd_muenriched
-#   condor_submit sf_2d-condor.jdl YEAR=2023 MC_SAMPLE=qcd_muenriched TXBB_REGION=all
-# Defaults if unset: MC_SAMPLE=ttbar, TXBB_REGION=all (= fail+pass_bb+pass_cc).
+#   condor_submit sf_2d-condor.jdl YEAR=2023                              # ttbar+qcd, all regions
+#   condor_submit sf_2d-condor.jdl YEAR=2023 MC_SAMPLE=ttbar               # ttbar only
+#   condor_submit sf_2d-condor.jdl YEAR=2023 MC_SAMPLE=qcd_muenriched      # QCD muon-enriched only
+#   condor_submit sf_2d-condor.jdl YEAR=2023 TXBB_REGION=pass_bb           # bb-pass region only
+# Defaults: MC_SAMPLE=both (= ttbar + qcd_muenriched), TXBB_REGION=all
+# (= fail + pass_bb + pass_cc).
 
 universe               = vanilla
 Executable             = shell
@@ -25,7 +27,9 @@ Error                  = sf_2d_$(YEAR)/$(Cluster)_$(Process).err
 Log                    = sf_2d_$(YEAR)/$(Cluster)_$(Process).log
 
 # Defaults so condor_submit without these vars still works.
-MC_SAMPLE   = ttbar
+# 'both' runs ttbar AND qcd_muenriched in sequence; results live under
+# .../<region>/<mc_sample>/ subdirectories, side-by-side.
+MC_SAMPLE   = both
 TXBB_REGION = all
 
 Arguments              = coffeateam/coffea-dask-almalinux8:2025.10.2-py3.10 bash run_sf_2d.sh --year $(YEAR) --mc-sample $(MC_SAMPLE) --txbb-region $(TXBB_REGION)
