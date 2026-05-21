@@ -1,0 +1,34 @@
+# JDL template for the extra-trigger study (study_extra_triggers.py).
+# Submit one year at a time:
+#   condor_submit extra_triggers-condor.jdl YEAR=2022
+#   condor_submit extra_triggers-condor.jdl YEAR=2023 MC_SAMPLE=ttbar
+#
+# Defaults: MC_SAMPLE=qcd_muenriched
+# To do a fast availability check on the grid worker, override the run command
+# by adding --check-only via the wrapper (see Arguments below).
+
+universe                = vanilla
+Executable              = shell
+should_transfer_files   = YES
+when_to_transfer_output = ON_EXIT
+transfer_input_files    = shell, run_extra_triggers.sh, study_extra_triggers.py, scale_factor_2d.py, infiles
+stream_output           = True
+stream_error            = True
+on_exit_remove          = (ExitBySignal == False) && (ExitCode == 0)
+max_retries             = 2
+
+# Bring back the figures directory (cwd in the job is /srv).
+# $(VAR:default) lets command-line `OUT_BASE=...` override the default; an
+# explicit `OUT_BASE = ...` line at file scope would clobber the command-line
+# value (HTCondor reads command-line first, then submit-file overrides).
+transfer_output_files   = $(OUT_BASE:figures_extra_trig)
+transfer_output_remaps  = "$(OUT_BASE:figures_extra_trig)=extra_trig_$(YEAR)/$(OUT_BASE:figures_extra_trig)"
+
+request_memory          = 6 GB
+
+Output                  = extra_trig_$(YEAR)/$(Cluster)_$(Process).out
+Error                   = extra_trig_$(YEAR)/$(Cluster)_$(Process).err
+Log                     = extra_trig_$(YEAR)/$(Cluster)_$(Process).log
+
+Arguments               = coffeateam/coffea-dask-almalinux8:2025.10.2-py3.10 bash run_extra_triggers.sh --year $(YEAR) --mc-sample $(MC_SAMPLE:qcd_muenriched) --out-base $(OUT_BASE:figures_extra_trig) $(EXTRA_ARGS:)
+Queue 1
