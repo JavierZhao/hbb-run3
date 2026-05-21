@@ -251,13 +251,19 @@ def round_robin_sample_lists(list_of_lists, n_total):
     return sampled
 
 
-# 2D trigger variables configuration
+# 2D trigger variables configuration.
+# Bin edges are coarser than uniform 15x20 to keep per-bin stats high
+# (target sigma_SF ~5-10%): finer in the populated band (pT 200-500, mSD 40-150),
+# coarser in the tails. Variable axes are drop-in compatible with downstream
+# np.histogram2d usage via .edges.
+_msd_edges = [0, 30, 60, 90, 120, 160, 220, 300]
+_pt_edges  = [200, 280, 360, 450, 550, 700, 1000]
 trig_vars_2d = {
     'pt_vs_msd': {
         'label_x': "Leading Jet $m_{SD}$ [GeV]",
         'label_y': "Leading Jet $p_{T}$ [GeV]",
-        'axis_x': hist.axis.Regular(bins=15, start=0, stop=300, name="msd", label="Leading Jet $m_{SD}$ [GeV]"),
-        'axis_y': hist.axis.Regular(bins=20, start=200, stop=1000, name="pt", label="Leading Jet $p_{T}$ [GeV]"),
+        'axis_x': hist.axis.Variable(_msd_edges, name="msd", label="Leading Jet $m_{SD}$ [GeV]"),
+        'axis_y': hist.axis.Variable(_pt_edges,  name="pt",  label="Leading Jet $p_{T}$ [GeV]"),
         'proc_x': lambda events: ak.fill_none(ak.pad_none(events.FatJet.msoftdrop, 1, clip=True)[:, 0], np.nan),
         'proc_y': lambda events: ak.fill_none(ak.pad_none(events.FatJet.pt, 1, clip=True)[:, 0], np.nan)
     }
@@ -1451,14 +1457,22 @@ if __name__ == "__main__":
 
     # File dictionaries
     # Muon dataset keys per period (data side, unchanged by --mc-sample)
+    # For 2023, only v3 and v4 re-recos contain the
+    # HLT_AK8PFJet250_SoftDropMass40_PNetBB0p06 branch (see scan_2023 study,
+    # 2026-05-20). v1/v2 files lack it entirely (0/121 in Muon0, 0/106 in Muon1)
+    # so including them silently halves the OR-eff in data and produces a
+    # spurious ~30-point data/MC gap. Restrict to v3+ here.
     muon_keys_by_period = {
-        '2022':     "Muon_Run2022C",
-        '2022EE':   "Muon_Run2022E",
+        '2022':     ["Muon_Run2022C", "Muon_Run2022D"],
+        '2022EE':   ["Muon_Run2022E", "Muon_Run2022F", "Muon_Run2022G"],
         '2023':     [
-            "Muon0_Run2023C-v1", "Muon0_Run2023C-v2", "Muon0_Run2023C-v3", "Muon0_Run2023C-v4",
-            "Muon1_Run2023C-v1", "Muon1_Run2023C-v2", "Muon1_Run2023C-v3", "Muon1_Run2023C-v4",
+            "Muon0_Run2023C-v3", "Muon0_Run2023C-v4",
+            "Muon1_Run2023C-v3", "Muon1_Run2023C-v4",
         ],
-        '2023BPix': ["Muon0_Run2023D-v1", "Muon0_Run2023D-v2"],
+        '2023BPix': [
+            "Muon0_Run2023D-v1", "Muon0_Run2023D-v2",
+            "Muon1_Run2023D-v1", "Muon1_Run2023D-v2",
+        ],
     }
 
     def _resolve_mc_source(mc_sample):
@@ -1571,13 +1585,20 @@ if __name__ == "__main__":
 
         workers = args.quick_workers if quick_test_mode else 2
         runner_maxchunks = args.quick_maxchunks if quick_test_mode else None
+        # xrootdtimeout=300 (vs coffea default 60s) — gives slow xrootd reads time
+        # to succeed; preprocessing has been seen to silently drop ALL files when
+        # transient timeouts hit, leading to empty chunks and a confusing
+        # TypeError in FuturesExecutor.__call__.
         iterative_run = processor.Runner(
-            executor=processor.FuturesExecutor(compression=None, workers=workers),
+            executor=processor.FuturesExecutor(
+                compression=None, workers=workers, recoverable=True,
+            ),
             schema=NanoAODSchema,
             skipbadfiles=True,
             savemetrics=True,
             chunksize=args.chunksize,
             maxchunks=runner_maxchunks,
+            xrootdtimeout=300,
         )
 
         # --- Inner loop: run processor separately for each txbb region ---
@@ -1596,16 +1617,29 @@ if __name__ == "__main__":
                 print(f"\nRunning 2D SF processor for {dataset_key} [{txbb_region}]...")
                 temp_fileset = {dataset_key: fileset[dataset_key]}
 
-                out = iterative_run(
-                    temp_fileset,
-                    treename="Events",
-                    processor_instance=ScaleFactor2DProcessor(
-                        year, trig_vars_2d,
-                        baseline_key=prod_mode,
-                        txbb_region=txbb_region,
-                        use_jetid_correction=use_jetid_correction
-                    ),
-                )
+                # Guard against the coffea executor returning None when *all*
+                # files fail metadata fetch (e.g. xrootd timeouts). Without this
+                # the whole job dies on the first bad region and later regions
+                # never run.
+                try:
+                    out = iterative_run(
+                        temp_fileset,
+                        treename="Events",
+                        processor_instance=ScaleFactor2DProcessor(
+                            year, trig_vars_2d,
+                            baseline_key=prod_mode,
+                            txbb_region=txbb_region,
+                            use_jetid_correction=use_jetid_correction
+                        ),
+                    )
+                except Exception as exc:
+                    print(f"  ERROR: iterative_run raised for {dataset_key} [{txbb_region}]: {exc!r}")
+                    print(f"  Continuing to next dataset/region.")
+                    continue
+                if out is None or not isinstance(out, tuple) or out[0] is None:
+                    print(f"  WARNING: iterative_run returned no output for {dataset_key} [{txbb_region}] "
+                          "(likely all files failed metadata fetch — check xrootd). Skipping.")
+                    continue
                 outputs[dataset_key] = out[0]
 
             data_keys = [k for k in outputs.keys() if 'Muon' in k]
