@@ -47,7 +47,10 @@ condor_sf/parking_vbf_2023BPix/
 condor_sf/figures_gen_H_pt_300/
 condor_sf/incomplete_runs/
 condor_sf/my_test_run/
+condor_sf/my_test_run_*/
 condor_sf/all_analyses/
+condor_sf/extra_trig_*/
+condor_sf/scan_2023/
 
 # --- Output file types anywhere ---
 *.coffea
@@ -55,6 +58,9 @@ condor_sf/all_analyses/
 *.err
 *.out
 *.pkl
+
+# --- Per-file backups created by rewrite_redirector.py and similar ---
+*.json.bak
 
 # --- Legacy / scratch ---
 old_runs/
