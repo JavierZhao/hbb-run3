@@ -50,7 +50,8 @@ condor_sf/my_test_run/
 condor_sf/my_test_run_*/
 condor_sf/all_analyses/
 condor_sf/extra_trig_*/
-condor_sf/scan_2023/
+condor_sf/scan_*/
+condor_sf/signal_eff_*/
 
 # --- Output file types anywhere ---
 *.coffea
