@@ -18,6 +18,7 @@ while [[ $# -gt 0 ]]; do
     --quick-files)    EXTRA_ARGS+=("--quick-files" "$2"); shift 2 ;;
     --probe-pt-min)   EXTRA_ARGS+=("--probe-pt-min" "$2"); shift 2 ;;
     --probe-ht-min)   EXTRA_ARGS+=("--probe-ht-min" "$2"); shift 2 ;;
+    --candidates)     EXTRA_ARGS+=("--candidates" "$2"); shift 2 ;;
     --chunksize)      EXTRA_ARGS+=("--chunksize" "$2"); shift 2 ;;
     --workers)        EXTRA_ARGS+=("--workers" "$2"); shift 2 ;;
     -h|--help)

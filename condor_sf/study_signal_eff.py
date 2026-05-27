@@ -287,14 +287,28 @@ def main():
     p.add_argument("--out-base", default="figures_signal_eff")
     p.add_argument("--probe-pt-min", type=float, default=None)
     p.add_argument("--probe-ht-min", type=float, default=None)
+    p.add_argument("--candidates", default=None,
+                   help="Comma-separated trigger names (without HLT_ prefix) to use as the "
+                        "candidate-OR overlay, replacing the default from study_extra_triggers. "
+                        "Example: --candidates VBF_DiPFJet125_45_Mjj720_Detajj3p0")
     args = p.parse_args()
 
     samples = ["ggF", "VBF"] if args.sample == "both" else [args.sample]
     current_triggers = CURRENT_TRIGGERS_BY_YEAR[args.year]
 
+    # Allow --candidates to override the default CANDIDATE_TRIGGERS list. Useful
+    # when the previous candidates are already in `trigger_dict_periods` (so
+    # they'd be a subset of current_triggers and the gain_new_only column would
+    # be trivially zero) and you want to compare against a different candidate
+    # set, e.g. just HLT_VBF_DiPFJet125_45_Mjj720_Detajj3p0.
+    if args.candidates:
+        candidate_triggers = [t.strip() for t in args.candidates.split(",") if t.strip()]
+    else:
+        candidate_triggers = CANDIDATE_TRIGGERS
+
     print(f"=== Signal-MC trigger eff: year={args.year}, samples={samples} ===")
     print(f"  current OR: {current_triggers}")
-    print(f"  candidates: {CANDIDATE_TRIGGERS}")
+    print(f"  candidates: {candidate_triggers}")
     print(f"  baseline:   pT > 450, mSD > 40 (no muon veto, no ref trigger)")
     if args.probe_pt_min or args.probe_ht_min:
         print(f"  extra cuts: pT > {args.probe_pt_min}, HT > {args.probe_ht_min}")
@@ -321,7 +335,7 @@ def main():
         proc = SignalEffProcessor(
             year=args.year,
             current_triggers=current_triggers,
-            candidate_triggers=CANDIDATE_TRIGGERS,
+            candidate_triggers=candidate_triggers,
             use_jetid_correction=True,
             probe_pt_min=args.probe_pt_min,
             probe_ht_min=args.probe_ht_min,
@@ -338,7 +352,7 @@ def main():
             continue
 
         write_outputs(out[0], args.year, sample, current_triggers,
-                      CANDIDATE_TRIGGERS, save_dir=save_dir)
+                      candidate_triggers, save_dir=save_dir)
 
 
 if __name__ == "__main__":
