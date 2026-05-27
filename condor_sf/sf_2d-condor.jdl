@@ -26,11 +26,9 @@ Output                 = sf_2d_$(YEAR)/$(Cluster)_$(Process).out
 Error                  = sf_2d_$(YEAR)/$(Cluster)_$(Process).err
 Log                    = sf_2d_$(YEAR)/$(Cluster)_$(Process).log
 
-# Defaults so condor_submit without these vars still works.
-# 'both' runs ttbar AND qcd_muenriched in sequence; results live under
-# .../<region>/<mc_sample>/ subdirectories, side-by-side.
-MC_SAMPLE   = both
-TXBB_REGION = all
-
-Arguments              = coffeateam/coffea-dask-almalinux8:2025.10.2-py3.10 bash run_sf_2d.sh --year $(YEAR) --mc-sample $(MC_SAMPLE) --txbb-region $(TXBB_REGION)
+# Defaults via $(VAR:default) macro so command-line `MC_SAMPLE=ttbar` etc.
+# actually override (a bare `MC_SAMPLE = both` at file scope would clobber
+# the command-line value). EXTRA_FLAGS lets per-region splits pass things
+# like `--no-recoverable` without rewriting Arguments.
+Arguments              = coffeateam/coffea-dask-almalinux8:2025.10.2-py3.10 bash run_sf_2d.sh --year $(YEAR) --mc-sample $(MC_SAMPLE:both) --txbb-region $(TXBB_REGION:all) $(EXTRA_FLAGS:)
 Queue 1

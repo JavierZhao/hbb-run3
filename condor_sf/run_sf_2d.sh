@@ -8,6 +8,7 @@ YEAR="2022"
 TEST_MODE=""
 MC_SAMPLE=""        # ttbar | qcd_muenriched (empty = use script default)
 TXBB_REGION=""      # fail | pass_bb | pass_cc | pass | inclusive | all
+EXTRA_FLAGS=""      # space-separated extra flags forwarded to python (e.g. --no-recoverable)
 PYTHON_BIN="${PYTHON_BIN:-python3}"   # optional env override
 
 # Parse args
@@ -15,8 +16,11 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     -y|--year) YEAR="$2"; shift 2 ;;
     --test) TEST_MODE="--test"; shift ;;
+    --quick-test) TEST_MODE="--quick-test"; shift ;;
     --mc-sample) MC_SAMPLE="--mc-sample $2"; shift 2 ;;
     --txbb-region) TXBB_REGION="--txbb-region $2"; shift 2 ;;
+    --no-recoverable) EXTRA_FLAGS="${EXTRA_FLAGS} --no-recoverable"; shift ;;
+    --workers) EXTRA_FLAGS="${EXTRA_FLAGS} --workers $2"; shift 2 ;;
     -p|--python) PYTHON_BIN="$2"; shift 2 ;;
     -h|--help)
       echo "Usage: $0 [-y|--year 2022] [--test] [--mc-sample ttbar|qcd_muenriched] [--txbb-region all|fail|pass_bb|pass_cc] [-p|--python python3]"
@@ -52,7 +56,7 @@ echo ">>> Run dir: ${RUN_DIR}"
 echo ">>> Log: ${LOGFILE}"
 
 set -x
-"${PYTHON_BIN}" "${SCRIPT_DIR}/scale_factor_2d.py" --year "${YEAR}" ${TEST_MODE} ${MC_SAMPLE} ${TXBB_REGION} 2>&1 | tee "${LOGFILE}"
+"${PYTHON_BIN}" "${SCRIPT_DIR}/scale_factor_2d.py" --year "${YEAR}" ${TEST_MODE} ${MC_SAMPLE} ${TXBB_REGION} ${EXTRA_FLAGS} 2>&1 | tee "${LOGFILE}"
 PYRC=${PIPESTATUS[0]}
 set +x
 
