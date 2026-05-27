@@ -272,23 +272,42 @@ trig_vars_2d = {
 }
 
 trigger_dict_periods = {
+    # All years extended on 2026-05-22 with PFJet500, AK8PFJet425_SoftDropMass40,
+    # and PFHT1050 (the "augmented OR"). study_extra_triggers.py q80 showed these
+    # close out the residual SF gap; study_signal_eff.py q10 confirmed +2-5% on
+    # ggF/VBF acceptance. scan_2022 / 2022EE / 2023 / 2023BPix verified all 5
+    # triggers exist in every readable Muon NanoAOD file in each year (2023
+    # restricted to v3+ in muon_keys_by_period to avoid the PNetBB0p06-missing
+    # v1/v2 re-recos).
     '2022': [
         'AK8PFJet250_SoftDropMass40_PFAK8ParticleNetBB0p35',
-        'QuadPFJet70_50_40_35_PFBTagParticleNet_2BTagSum0p65'
+        'QuadPFJet70_50_40_35_PFBTagParticleNet_2BTagSum0p65',
+        'PFJet500',
+        'AK8PFJet425_SoftDropMass40',
+        'PFHT1050',
     ],
     '2022EE': [
         'AK8PFJet250_SoftDropMass40_PFAK8ParticleNetBB0p35',
-        'QuadPFJet70_50_40_35_PFBTagParticleNet_2BTagSum0p65'
+        'QuadPFJet70_50_40_35_PFBTagParticleNet_2BTagSum0p65',
+        'PFJet500',
+        'AK8PFJet425_SoftDropMass40',
+        'PFHT1050',
     ],
     '2023': [
         'AK8PFJet250_SoftDropMass40_PNetBB0p06',
         'PFHT340_QuadPFJet70_50_40_40_PNet2BTagMean0p70',
+        'PFJet500',
+        'AK8PFJet425_SoftDropMass40',
+        'PFHT1050',
         # VBF_DiPFJet125_45_Mjj720_Detajj3p0 uses a different calibration strategy.
         # Excluded from trigger SF OR and per-trigger table in this workflow.
     ],
     '2023BPix': [
         'AK8PFJet250_SoftDropMass40_PNetBB0p06',
         'PFHT340_QuadPFJet70_50_40_40_PNet2BTagMean0p70',
+        'PFJet500',
+        'AK8PFJet425_SoftDropMass40',
+        'PFHT1050',
         # VBF_DiPFJet125_45_Mjj720_Detajj3p0 uses a different calibration strategy.
         # It is also in ParkingVBF stream only and not stored in Muon0 PD for Run2023D.
     ]
