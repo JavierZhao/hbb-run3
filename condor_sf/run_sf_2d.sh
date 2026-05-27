@@ -63,7 +63,17 @@ set +x
 # Build the summary doc as the last step of the job.
 # `pip install --user markdown` is a small pure-Python wheel (no system deps);
 # if no network is available the script still emits summary.md without HTML.
-if [[ "${PYRC}" -eq 0 ]] && [[ -d "figures_sf_2d" ]]; then
+#
+# Only meaningful when the job covers the FULL scope (all 3 regions × both
+# MC samples) — i.e. when MC_SAMPLE is empty/"both" AND TXBB_REGION is
+# empty/"all". For per-region split sub-jobs we'd be summarizing just one
+# combo (and six concurrent sub-jobs would race to overwrite each other's
+# summary.md), so skip and let the user run summarize_year.sh post-merge.
+_is_full_scope=true
+[[ -n "${MC_SAMPLE}"   && ! "${MC_SAMPLE}"   =~ both ]] && _is_full_scope=false
+[[ -n "${TXBB_REGION}" && ! "${TXBB_REGION}" =~ all  ]] && _is_full_scope=false
+
+if [[ "${PYRC}" -eq 0 ]] && [[ -d "figures_sf_2d" ]] && ${_is_full_scope}; then
   echo ">>> Building summary index ..."
   "${PYTHON_BIN}" -m pip install --user --quiet markdown 2>/dev/null || \
     echo ">>> (python-markdown unavailable; will emit summary.md only, no HTML)"
@@ -71,6 +81,9 @@ if [[ "${PYRC}" -eq 0 ]] && [[ -d "figures_sf_2d" ]]; then
     --base-outdir . \
     --out figures_sf_2d/summary.md \
     --pdf 2>&1 | tee -a "${LOGFILE}"
+elif ! ${_is_full_scope}; then
+  echo ">>> Partial-scope run (MC_SAMPLE=${MC_SAMPLE} TXBB_REGION=${TXBB_REGION})."
+  echo ">>> Skipping summary build — run summarize_year.sh ${YEAR} after all sub-jobs complete."
 fi
 
 echo ">>> Done. Processed both VBF and ggF production modes for data and MC."
