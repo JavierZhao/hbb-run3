@@ -253,11 +253,13 @@ def round_robin_sample_lists(list_of_lists, n_total):
 
 # 2D trigger variables configuration.
 # Bin edges are coarser than uniform 15x20 to keep per-bin stats high
-# (target sigma_SF ~5-10%): finer in the populated band (pT 200-500, mSD 40-150),
-# coarser in the tails. Variable axes are drop-in compatible with downstream
-# np.histogram2d usage via .edges.
+# (target sigma_SF ~5-10%): finer in the populated band, coarser in the tails.
+# Variable axes are drop-in compatible with downstream np.histogram2d usage
+# via .edges.
+# pT edges start at 450 (matches the new pT > 450 baseline cut — see
+# create_baseline_selection_mask_new). Old edges 200..360 are now always empty.
 _msd_edges = [0, 30, 60, 90, 120, 160, 220, 300]
-_pt_edges  = [200, 280, 360, 450, 550, 700, 1000]
+_pt_edges  = [450, 525, 600, 700, 850, 1000]
 trig_vars_2d = {
     'pt_vs_msd': {
         'label_x': "Leading Jet $m_{SD}$ [GeV]",
@@ -300,7 +302,7 @@ muon_triggers = {
     '2023BPix': ["HLT_Mu50", "HLT_CascadeMu100", "HLT_HighPtTkMu100", "HLT_IsoMu24"],
 }
 
-def create_baseline_selection_mask_new(events, tag, year, txbb_region='inclusive', use_jetid_correction=True):
+def create_baseline_selection_mask_new(events, tag, year, txbb_region='inclusive', use_jetid_correction=True, require_muon=True):
     """
     txbb_region: 'fail'      -> candidatejet (Xbb+Xcc) <  TXBB_WP (0.82) [AN Sec 5.1 Fail]
                  'pass_bb'   -> Xbb+Xcc >= 0.82 AND Xbb > Xcc           [AN Sec 5.1 Pass-bb]
@@ -345,8 +347,12 @@ def create_baseline_selection_mask_new(events, tag, year, txbb_region='inclusive
     candidate_pt    = ak.fill_none(candidatejet.pt, -1)
     candidate_msd   = ak.fill_none(candidatejet.msoftdrop, -1)
 
-    # Step 2a: analysis-baseline kinematic cuts on the candidate jet (AN signal-region preselection)
-    kine_mask = (candidate_pt > 300) & (candidate_msd > 40)
+    # Step 2a: analysis-baseline kinematic cuts on the candidate jet (AN signal-region preselection).
+    # pT > 450 (was 300): puts the candidate inside the plateau of every trigger leg in
+    # the augmented OR (AK8PFJet250 + AK8PFJet425 + PFJet500 etc.) so the per-bin SF is
+    # not biased by the AK8 turn-on shape. q10 study on 2026-05-22 showed augmented_OR SF
+    # rises 0.73->0.97 when this cut is applied — see study_extra_triggers.py results.
+    kine_mask = (candidate_pt > 450) & (candidate_msd > 40)
     baseline_mask &= ak.to_numpy(kine_mask)
 
     # Step 2b: AN Section 5.1 region split on the candidate jet
@@ -390,23 +396,28 @@ def create_baseline_selection_mask_new(events, tag, year, txbb_region='inclusive
         vbf_mask = has_two_jets & has_valid_pair
         baseline_mask &= ak.to_numpy(vbf_mask)
 
-    # Step 4: Muon veto - require at least one loose muon far from leading FatJet
-    muons = events.Muon
-    loose_muon_selection = (
-        (muons.pt > 25) & (abs(muons.eta) < 2.4) & (muons.looseId) & (muons.pfRelIso04_all < 0.25)
-    )
-    loose_muons = muons[loose_muon_selection]
-    has_loose_muon = ak.num(loose_muons) >= 1
+    # Step 4: Muon veto - require at least one loose muon far from leading FatJet.
+    # Only relevant for the SF probe (Z(μμ)-orthogonal data + QCD/ttbar MC). For
+    # signal MC (ggF/VBF/WH/ZH/ttH) we don't want this — pass require_muon=False
+    # to skip it and measure trigger efficiency directly on the analysis-region
+    # selection.
+    if require_muon:
+        muons = events.Muon
+        loose_muon_selection = (
+            (muons.pt > 25) & (abs(muons.eta) < 2.4) & (muons.looseId) & (muons.pfRelIso04_all < 0.25)
+        )
+        loose_muons = muons[loose_muon_selection]
+        has_loose_muon = ak.num(loose_muons) >= 1
 
-    # Veto jets near the muon: compute ΔR(mu, leading FatJet) and require > 0.8
-    leading_fj = ak.firsts(ak.pad_none(events.FatJet, 1, clip=True))
-    dphi = np.abs(((loose_muons.phi - leading_fj.phi + np.pi) % (2 * np.pi)) - np.pi)
-    deta = loose_muons.eta - leading_fj.eta
-    dr = np.sqrt(dphi**2 + deta**2)
-    far_enough = ak.fill_none(ak.any(dr > 0.8, axis=1), True)
+        # Veto jets near the muon: compute ΔR(mu, leading FatJet) and require > 0.8
+        leading_fj = ak.firsts(ak.pad_none(events.FatJet, 1, clip=True))
+        dphi = np.abs(((loose_muons.phi - leading_fj.phi + np.pi) % (2 * np.pi)) - np.pi)
+        deta = loose_muons.eta - leading_fj.eta
+        dr = np.sqrt(dphi**2 + deta**2)
+        far_enough = ak.fill_none(ak.any(dr > 0.8, axis=1), True)
 
-    muon_veto = has_loose_muon & far_enough
-    baseline_mask &= ak.to_numpy(muon_veto)
+        muon_veto = has_loose_muon & far_enough
+        baseline_mask &= ak.to_numpy(muon_veto)
 
     assert len(baseline_mask) == n_events, "Baseline mask length does not match number of events!"
     return baseline_mask
@@ -1395,6 +1406,13 @@ if __name__ == "__main__":
                         help="Maximum chunks per dataset in --quick-test mode (default: 2).")
     parser.add_argument('--chunksize', type=int, default=100000,
                         help="Events per chunk for coffea Runner (default: 100000).")
+    parser.add_argument('--workers', type=int, default=4,
+                        help="Number of FuturesExecutor workers in regular (non-quick) mode "
+                             "(default: 4). Bumped from 2 after 48h timeouts on 2022/2022EE/2023.")
+    parser.add_argument('--no-recoverable', action='store_true',
+                        help="Debug-only: disable FuturesExecutor recoverable=True so per-chunk "
+                             "exceptions propagate. Use to diagnose 'No chunks returned results' "
+                             "failures (recoverable hides the underlying cause).")
     parser.add_argument('--txbb-region',
                         choices=['fail', 'pass_bb', 'pass_cc', 'pass', 'inclusive', 'all'],
                         default='all',
@@ -1583,15 +1601,44 @@ if __name__ == "__main__":
         print("Constructed fileset:")
         print(json.dumps(fileset, indent=2))
 
-        workers = args.quick_workers if quick_test_mode else 2
+        # ---- sanity check: every analysis trigger has a branch in the first file ----
+        # Catches regressions like "added a new trigger name but the v1/v2 NanoAODs
+        # don't actually carry that branch" (the bug that caused the original 2023
+        # 30-pt SF gap). Soft warning: we don't kill the job, since transient xrootd
+        # failures at startup shouldn't be fatal, but every missing branch is logged
+        # loudly so a grep -E "TRIGGER-MISSING|TRIGGER-OK" in the .out catches it.
+        _expected_trigs = list(trigger_dict_periods.get(year, [])) + list(muon_triggers.get(year, []))
+        for _ds_key, _files in fileset.items():
+            if not _files:
+                continue
+            try:
+                with uproot.open(_files[0]) as _f:
+                    _branches = set(_f["Events"].keys())
+            except Exception as _exc:
+                print(f"  TRIGGER-CHECK-SKIP {_ds_key}: could not open {_files[0]}: {_exc!r}")
+                continue
+            for _t in _expected_trigs:
+                _tfield = _t[4:] if _t.startswith("HLT_") else _t
+                _hlt_name = f"HLT_{_tfield}"
+                if _hlt_name in _branches:
+                    print(f"  TRIGGER-OK      {_ds_key}: {_hlt_name}")
+                else:
+                    print(f"  TRIGGER-MISSING {_ds_key}: {_hlt_name} (downstream OR will silently skip this leg!)")
+
+        workers = args.quick_workers if quick_test_mode else args.workers
         runner_maxchunks = args.quick_maxchunks if quick_test_mode else None
         # xrootdtimeout=300 (vs coffea default 60s) — gives slow xrootd reads time
         # to succeed; preprocessing has been seen to silently drop ALL files when
         # transient timeouts hit, leading to empty chunks and a confusing
         # TypeError in FuturesExecutor.__call__.
+        # recoverable=True swallows per-chunk exceptions and returns the partial
+        # accumulator (or None if everything failed). Use --no-recoverable for a
+        # debug run that lets the underlying chunk exception propagate so we can
+        # actually see why chunks are dying.
         iterative_run = processor.Runner(
             executor=processor.FuturesExecutor(
-                compression=None, workers=workers, recoverable=True,
+                compression=None, workers=workers,
+                recoverable=(not args.no_recoverable),
             ),
             schema=NanoAODSchema,
             skipbadfiles=True,
