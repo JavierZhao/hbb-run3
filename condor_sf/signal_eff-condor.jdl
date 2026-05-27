@@ -1,0 +1,27 @@
+# JDL for signal-MC trigger-efficiency study (ggF / VBF / WH / ZH / ttH).
+# Examples:
+#   condor_submit signal_eff-condor.jdl YEAR=2022
+#   condor_submit signal_eff-condor.jdl YEAR=2023 SAMPLE=ggF
+#   condor_submit signal_eff-condor.jdl YEAR=2022 OUT_BASE=figures_signal_eff_q10
+
+universe                = vanilla
+Executable              = shell
+should_transfer_files   = YES
+when_to_transfer_output = ON_EXIT
+transfer_input_files    = shell, run_signal_eff.sh, study_signal_eff.py, study_extra_triggers.py, scale_factor_2d.py, infiles
+stream_output           = True
+stream_error            = True
+on_exit_remove          = (ExitBySignal == False) && (ExitCode == 0)
+max_retries             = 2
+
+transfer_output_files   = $(OUT_BASE:figures_signal_eff)
+transfer_output_remaps  = "$(OUT_BASE:figures_signal_eff)=signal_eff_$(YEAR)/$(OUT_BASE:figures_signal_eff)"
+
+request_memory          = 6 GB
+
+Output                  = signal_eff_$(YEAR)/$(Cluster)_$(Process).out
+Error                   = signal_eff_$(YEAR)/$(Cluster)_$(Process).err
+Log                     = signal_eff_$(YEAR)/$(Cluster)_$(Process).log
+
+Arguments               = coffeateam/coffea-dask-almalinux8:2025.10.2-py3.10 bash run_signal_eff.sh --year $(YEAR) --sample $(SAMPLE:both) --out-base $(OUT_BASE:figures_signal_eff) $(EXTRA_ARGS:)
+Queue 1
