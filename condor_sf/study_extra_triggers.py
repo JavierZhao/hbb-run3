@@ -79,7 +79,7 @@ MUON_KEYS_BY_PERIOD = {
     ],
 }
 
-PT_EDGES = [200, 280, 360, 450, 550, 700, 1000]  # match scale_factor_2d.py
+PT_EDGES = [450, 525, 600, 700, 850, 1000]  # match scale_factor_2d.py (post pT>450 default)
 
 
 # ---------------------------------------------------------------------------
@@ -138,15 +138,27 @@ def check_trigger_branches(year: str, mc_sample: str = "qcd_muenriched") -> dict
 # Processor
 # ---------------------------------------------------------------------------
 class ExtraTriggerStudyProcessor(processor.ProcessorABC):
-    """Fills baseline + per-trigger + OR counts and a 1D pT histogram per category."""
+    """Fills baseline + per-trigger + OR counts and a 1D pT histogram per category.
+
+    Optional plateau-probe cuts (applied on top of the standard probe):
+      probe_pt_min: if not None, require candidate AK8 pT > probe_pt_min (GeV).
+      probe_ht_min: if not None, require HT > probe_ht_min (GeV) where
+        HT = Σ pT of AK4 jets with pT > 30, |η| < 2.5 (standard CMS def).
+    Common presets:
+      pT > 450 ∧ HT > 1100   — plateau of every candidate trigger ('tight')
+      pT > 450 only          — AK8-only plateau, no HT requirement
+    """
 
     def __init__(self, year, current_triggers, candidate_triggers,
-                 use_jetid_correction=True):
+                 use_jetid_correction=True,
+                 probe_pt_min=None, probe_ht_min=None):
         self.year = year
         self.current_triggers = list(current_triggers)
         self.candidate_triggers = list(candidate_triggers)
         self.all_triggers = self.current_triggers + self.candidate_triggers
         self.use_jetid_correction = use_jetid_correction
+        self.probe_pt_min = probe_pt_min
+        self.probe_ht_min = probe_ht_min
 
         # Categories we fill: baseline, each trigger individually, current_OR, augmented_OR, gain
         categories = (
@@ -190,6 +202,24 @@ class ExtraTriggerStudyProcessor(processor.ProcessorABC):
         if probe_mask.sum() == 0:
             return out
         events_p = events[probe_mask]
+
+        # ---- optional plateau-probe cuts (each applied only if its threshold is set) ----
+        if self.probe_pt_min is not None or self.probe_ht_min is not None:
+            tight_mask = np.ones(len(events_p), dtype=bool)
+            if self.probe_pt_min is not None:
+                # Leading AK8 pT (-1 if no AK8 in event)
+                cand_pt_pre = ak.fill_none(
+                    ak.firsts(ak.pad_none(events_p.FatJet.pt, 1, clip=True)), -1.0
+                )
+                tight_mask &= ak.to_numpy(cand_pt_pre) > float(self.probe_pt_min)
+            if self.probe_ht_min is not None:
+                # HT = scalar sum of AK4 pT for pT > 30, |eta| < 2.5 (standard CMS def)
+                ak4_for_ht = (events_p.Jet.pt > 30) & (abs(events_p.Jet.eta) < 2.5)
+                ht_pre = ak.sum(events_p.Jet.pt[ak4_for_ht], axis=1)
+                tight_mask &= ak.to_numpy(ht_pre) > float(self.probe_ht_min)
+            events_p = events_p[tight_mask]
+            if len(events_p) == 0:
+                return out
 
         # Candidate-fatjet pT (matches the leading-score candidate logic in the main script;
         # for this 1D study we use the leading-pT AK8 as a simple proxy — sufficient
@@ -418,7 +448,24 @@ def main():
     p.add_argument("--chunksize", type=int, default=100_000)
     p.add_argument("--workers", type=int, default=2)
     p.add_argument("--out-base", default="figures_extra_trig")
+    p.add_argument("--probe-tight", action="store_true",
+                   help="Shortcut for --probe-pt-min 450 --probe-ht-min 1100 "
+                        "(puts the probe inside the plateau of every candidate "
+                        "trigger).")
+    p.add_argument("--probe-pt-min", type=float, default=None,
+                   help="Require offline candidate AK8 pT > VALUE (GeV).")
+    p.add_argument("--probe-ht-min", type=float, default=None,
+                   help="Require offline HT > VALUE (GeV), HT = sum pT of "
+                        "AK4 jets with pT > 30, |eta| < 2.5.")
     args = p.parse_args()
+
+    # Resolve --probe-tight to explicit cuts, but let explicit --probe-pt-min /
+    # --probe-ht-min override (so e.g. `--probe-tight --probe-ht-min 0` works).
+    if args.probe_tight:
+        if args.probe_pt_min is None:
+            args.probe_pt_min = 450.0
+        if args.probe_ht_min is None:
+            args.probe_ht_min = 1100.0
 
     if args.check_only:
         check_trigger_branches(args.year, args.mc_sample)
@@ -438,6 +485,13 @@ def main():
     print(f"  candidates: {CANDIDATE_TRIGGERS}")
     print(f"  save dir:   {save_dir}")
     print(f"  test mode:  {bool(args.test)} (quick_files={quick_files}, maxchunks={maxchunks})")
+    _probe_parts = []
+    if args.probe_pt_min is not None:
+        _probe_parts.append(f"AK8 pT > {args.probe_pt_min:g}")
+    if args.probe_ht_min is not None:
+        _probe_parts.append(f"HT > {args.probe_ht_min:g}")
+    _probe_desc = " AND ".join(_probe_parts) if _probe_parts else "standard (analysis preselection)"
+    print(f"  probe:      {_probe_desc}")
 
     fileset = load_fileset(args.year, args.mc_sample, quick_files, save_dir)
     if any(len(v) == 0 for v in fileset.values()):
@@ -449,6 +503,8 @@ def main():
         current_triggers=current_triggers,
         candidate_triggers=CANDIDATE_TRIGGERS,
         use_jetid_correction=True,
+        probe_pt_min=args.probe_pt_min,
+        probe_ht_min=args.probe_ht_min,
     )
     runner = processor.Runner(
         executor=processor.FuturesExecutor(

@@ -21,6 +21,9 @@ while [[ $# -gt 0 ]]; do
     --chunksize)      EXTRA_ARGS+=("--chunksize" "$2"); shift 2 ;;
     --workers)        EXTRA_ARGS+=("--workers" "$2"); shift 2 ;;
     --quick-files)    EXTRA_ARGS+=("--quick-files" "$2"); shift 2 ;;
+    --probe-tight)    EXTRA_ARGS+=("--probe-tight"); shift ;;
+    --probe-pt-min)   EXTRA_ARGS+=("--probe-pt-min" "$2"); shift 2 ;;
+    --probe-ht-min)   EXTRA_ARGS+=("--probe-ht-min" "$2"); shift 2 ;;
     -h|--help)
       cat <<EOF
 Usage: $0 [-y YEAR] [--mc-sample ttbar|qcd_muenriched]
