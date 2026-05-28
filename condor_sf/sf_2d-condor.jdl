@@ -20,7 +20,7 @@ max_retries      = 3
 transfer_output_files  = figures_sf_2d, output
 transfer_output_remaps = "figures_sf_2d=sf_2d_$(YEAR)/figures_sf_2d;output=sf_2d_$(YEAR)/output"
 
-request_memory         = 8 GB
+request_memory         = 12 GB
 
 Output                 = sf_2d_$(YEAR)/$(Cluster)_$(Process).out
 Error                  = sf_2d_$(YEAR)/$(Cluster)_$(Process).err

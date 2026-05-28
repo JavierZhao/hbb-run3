@@ -17,7 +17,7 @@ max_retries             = 2
 transfer_output_files   = $(OUT_BASE:figures_signal_eff)
 transfer_output_remaps  = "$(OUT_BASE:figures_signal_eff)=signal_eff_$(YEAR)/$(OUT_BASE:figures_signal_eff)"
 
-request_memory          = 6 GB
+request_memory          = 10 GB
 
 Output                  = signal_eff_$(YEAR)/$(Cluster)_$(Process).out
 Error                   = signal_eff_$(YEAR)/$(Cluster)_$(Process).err
