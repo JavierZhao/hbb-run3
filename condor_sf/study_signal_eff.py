@@ -5,20 +5,23 @@ under the current_OR vs augmented_OR trigger soups, with the analysis baseline
 Why this exists: scale_factor_2d.py measures SF on data + QCD/ttbar MC using a
 Z(μμ)-orthogonal probe. For *signal* MC (ggF→bb, VBF→bb, …) we just want to
 know what fraction of analysis-region events fire the trigger soup — no probe,
-no orthogonal trigger. Adds a per-sample efficiency table that's directly
-usable as the "trigger acceptance" number in the analysis cutflow.
+no orthogonal trigger. This gives the "trigger acceptance" numbers + plots that
+parallel the SF pipeline for the AN.
 
-Output per (year, sample):
-    figures_signal_eff/<year>/<sample>/per_trigger_efficiency.csv
-    figures_signal_eff/<year>/<sample>/eff_vs_pt.png
+Mirrors scale_factor_2d.py coverage:
+  - efficiency vs leading-jet pT, mSD, and Xbb+Xcc score
+  - split by AN Sec 5.1 regions: inclusive, fail, pass_bb, pass_cc
+
+Output per (year, sample, region):
+    figures_signal_eff/<year>/<sample>/<region>/per_trigger_efficiency.csv
+    figures_signal_eff/<year>/<sample>/<region>/eff_vs_{pt,msd,score}.png
 
 Usage
 -----
-    # Quick check (10 files per sample, ~5 min):
     python3 study_signal_eff.py --year 2022 --sample both --quick-files 10
-
-    # Full run:
     python3 study_signal_eff.py --year 2022 --sample both
+    python3 study_signal_eff.py --year 2023 --sample VBF \
+        --candidates VBF_DiPFJet125_45_Mjj720_Detajj3p0
 """
 from __future__ import annotations
 import argparse
@@ -47,22 +50,34 @@ from scale_factor_2d import (
     binomial_eff_err,
     trigger_dict_periods as CURRENT_TRIGGERS_BY_YEAR,
     round_robin_sample_lists,
+    get_txbb_txcc_score,
+    corrected_jetid_tight_mask,
 )
 from study_extra_triggers import CANDIDATE_TRIGGERS, PT_EDGES
 
+# AN Sec 5.1 regions (inclusive + the bb/cc/fail split)
+REGIONS = ["inclusive", "fail", "pass_bb", "pass_cc"]
 
-# JSON keys for signal MC per year. Conventionally the JSON has 1 key whose
-# name we don't try to enforce — we just take all files across all keys.
-SIGNAL_KEYS_BY_SAMPLE = ("ggF", "VBF", "WH", "ZH", "ttH")
+# Variable binning (pT matches scale_factor_2d post-pT>450; mSD matches its
+# _msd_edges; score is the Xbb+Xcc tagger axis 0..1).
+MSD_EDGES = [0, 30, 60, 90, 120, 160, 220, 300]
+VAR_SPECS = {
+    "pt":    (hist.axis.Variable(PT_EDGES,  name="val"), "Leading AK8 jet $p_T$ [GeV]"),
+    "msd":   (hist.axis.Variable(MSD_EDGES, name="val"), "Leading AK8 jet $m_{SD}$ [GeV]"),
+    "score": (hist.axis.Regular(20, 0.0, 1.0, name="val"), "Leading AK8 jet $X_{bb}+X_{cc}$"),
+}
 
 
 # ---------------------------------------------------------------------------
 # Processor
 # ---------------------------------------------------------------------------
 class SignalEffProcessor(processor.ProcessorABC):
-    """Counts events that pass the analysis baseline (pT>450, mSD>40, no muon
-    veto) and then check which trigger(s) fire. Fills counts + 1D pT histogram
-    per category (baseline, each trigger, current_OR, augmented_OR, gain_only).
+    """Trigger efficiency on signal MC vs pT / mSD / score, in 4 regions.
+
+    Baseline = analysis preselection (pT>450, mSD>40, FatJet preselection,
+    JetID) WITHOUT the muon veto and WITHOUT a reference trigger. The region
+    split (fail/pass_bb/pass_cc) reuses create_baseline_selection_mask_new so
+    the definitions are identical to the SF pipeline.
     """
 
     def __init__(self, year, current_triggers, candidate_triggers,
@@ -76,18 +91,21 @@ class SignalEffProcessor(processor.ProcessorABC):
         self.probe_pt_min = probe_pt_min
         self.probe_ht_min = probe_ht_min
 
-        categories = (
+        self.cats = (
             ["baseline"]
             + [f"trig_{t}" for t in self.all_triggers]
             + ["current_OR", "augmented_OR", "gain_new_only"]
         )
-        pt_axis = hist.axis.Variable(PT_EDGES, name="pt", label="Leading AK8 jet $p_T$ [GeV]")
-        cat_axis = hist.axis.StrCategory(categories, name="cat", label="Category")
-        self._accumulator = dict_accumulator({
-            "h_pt": hist.Hist(cat_axis, pt_axis, storage="double"),
-            "counts": dict_accumulator({c: 0 for c in categories}),
-            "missing_triggers": dict_accumulator(),
-        })
+        region_axis = hist.axis.StrCategory(REGIONS, name="region")
+        cat_axis = hist.axis.StrCategory(self.cats, name="cat")
+        hists = {}
+        for vname, (vaxis, _label) in VAR_SPECS.items():
+            hists[f"h_{vname}"] = hist.Hist(region_axis, cat_axis, vaxis, storage="double")
+        hists["counts"] = dict_accumulator(
+            {f"{r}/{c}": 0 for r in REGIONS for c in self.cats}
+        )
+        hists["missing_triggers"] = dict_accumulator()
+        self._accumulator = dict_accumulator(hists)
 
     @property
     def accumulator(self):
@@ -95,74 +113,80 @@ class SignalEffProcessor(processor.ProcessorABC):
 
     def process(self, events):
         out = self.accumulator.copy()
-        if len(events) == 0:
+        n0 = len(events)
+        if n0 == 0:
             return out
 
-        # ---- baseline WITHOUT muon veto, WITHOUT reference trigger ----
-        baseline_mask = create_baseline_selection_mask_new(
-            events, tag="Inclusive", year=self.year,
-            txbb_region="inclusive",
-            use_jetid_correction=self.use_jetid_correction,
-            require_muon=False,
-        )
-        baseline_mask = np.asarray(baseline_mask, dtype=bool)
-        if baseline_mask.sum() == 0:
-            return out
-        events_p = events[baseline_mask]
+        # ---- per-event observables (leading-pT FatJet for pT/mSD; leading-score
+        #      candidate for the tagger-score axis, mirroring scale_factor_2d) ----
+        fj_pt = ak.to_numpy(ak.fill_none(
+            ak.firsts(ak.pad_none(events.FatJet.pt, 1, clip=True)), -1.0))
+        fj_msd = ak.to_numpy(ak.fill_none(
+            ak.firsts(ak.pad_none(events.FatJet.msoftdrop, 1, clip=True)), -1.0))
 
-        # ---- optional further-tightening probe cuts (rarely needed for signal) ----
-        if self.probe_pt_min is not None or self.probe_ht_min is not None:
-            tight_mask = np.ones(len(events_p), dtype=bool)
-            if self.probe_pt_min is not None:
-                cand_pt_pre = ak.fill_none(
-                    ak.firsts(ak.pad_none(events_p.FatJet.pt, 1, clip=True)), -1.0
-                )
-                tight_mask &= ak.to_numpy(cand_pt_pre) > float(self.probe_pt_min)
-            if self.probe_ht_min is not None:
-                ak4_for_ht = (events_p.Jet.pt > 30) & (abs(events_p.Jet.eta) < 2.5)
-                ht_pre = ak.sum(events_p.Jet.pt[ak4_for_ht], axis=1)
-                tight_mask &= ak.to_numpy(ht_pre) > float(self.probe_ht_min)
-            events_p = events_p[tight_mask]
-            if len(events_p) == 0:
-                return out
+        fatjets = events.FatJet
+        fj_tight = corrected_jetid_tight_mask(
+            fatjets, jet_type="AK8", year=self.year,
+            use_jetid_correction=self.use_jetid_correction)
+        cand = fatjets[(fatjets.pt > 200) & (abs(fatjets.eta) < 2.5) & fj_tight][:, :2]
+        cand_scores = get_txbb_txcc_score(cand)
+        cand_lead = ak.firsts(cand[ak.argmax(cand_scores, axis=1, keepdims=True)])
+        score = ak.to_numpy(ak.fill_none(get_txbb_txcc_score(cand_lead), -1.0))
 
-        # Leading AK8 pT (-1 if no AK8 in event)
-        if "FatJet" in events_p.fields:
-            cand_pt = ak.to_numpy(
-                ak.fill_none(ak.firsts(ak.pad_none(events_p.FatJet.pt, 1, clip=True)), -1.0)
-            )
-        else:
-            cand_pt = np.full(len(events_p), -1.0)
+        val_by_var = {"pt": fj_pt, "msd": fj_msd, "score": score}
 
-        # ---- per-trigger pass arrays ----
+        # ---- per-trigger pass arrays (full events) ----
         trig_pass = {}
         for t in self.all_triggers:
             tfield = t[4:] if t.startswith("HLT_") else t
-            if tfield in events_p.HLT.fields:
-                trig_pass[t] = ak.to_numpy(getattr(events_p.HLT, tfield)).astype(bool)
+            if tfield in events.HLT.fields:
+                trig_pass[t] = ak.to_numpy(getattr(events.HLT, tfield)).astype(bool)
             else:
-                trig_pass[t] = np.zeros(len(events_p), dtype=bool)
+                trig_pass[t] = np.zeros(n0, dtype=bool)
                 out["missing_triggers"][t] = out["missing_triggers"].get(t, 0) + 1
 
-        current_or = np.logical_or.reduce([trig_pass[t] for t in self.current_triggers]) \
-            if self.current_triggers else np.zeros(len(events_p), dtype=bool)
-        cand_or = np.logical_or.reduce([trig_pass[t] for t in self.candidate_triggers]) \
-            if self.candidate_triggers else np.zeros(len(events_p), dtype=bool)
-        augmented_or = current_or | cand_or
-        gain_only = cand_or & ~current_or
+        cur = (np.logical_or.reduce([trig_pass[t] for t in self.current_triggers])
+               if self.current_triggers else np.zeros(n0, dtype=bool))
+        cnd = (np.logical_or.reduce([trig_pass[t] for t in self.candidate_triggers])
+               if self.candidate_triggers else np.zeros(n0, dtype=bool))
+        aug = cur | cnd
+        gain = cnd & ~cur
+        cat_masks = {"baseline": np.ones(n0, dtype=bool)}
+        for t in self.all_triggers:
+            cat_masks[f"trig_{t}"] = trig_pass[t]
+        cat_masks["current_OR"] = cur
+        cat_masks["augmented_OR"] = aug
+        cat_masks["gain_new_only"] = gain
 
-        # ---- fill ----
-        out["h_pt"].fill(cat="baseline", pt=cand_pt)
-        out["counts"]["baseline"] += len(events_p)
-        for t, m in trig_pass.items():
-            out["h_pt"].fill(cat=f"trig_{t}", pt=cand_pt[m])
-            out["counts"][f"trig_{t}"] += int(m.sum())
-        for name, m in [("current_OR", current_or),
-                        ("augmented_OR", augmented_or),
-                        ("gain_new_only", gain_only)]:
-            out["h_pt"].fill(cat=name, pt=cand_pt[m])
-            out["counts"][name] += int(m.sum())
+        # ---- optional probe tightening (same cut for all regions) ----
+        tight = np.ones(n0, dtype=bool)
+        if self.probe_pt_min is not None:
+            tight &= fj_pt > float(self.probe_pt_min)
+        if self.probe_ht_min is not None:
+            ak4 = (events.Jet.pt > 30) & (abs(events.Jet.eta) < 2.5)
+            ht = ak.to_numpy(ak.sum(events.Jet.pt[ak4], axis=1))
+            tight &= ht > float(self.probe_ht_min)
 
+        # ---- per region: baseline mask (no muon veto) then fill ----
+        for region in REGIONS:
+            rmask = np.asarray(create_baseline_selection_mask_new(
+                events, tag="Inclusive", year=self.year,
+                txbb_region=region,
+                use_jetid_correction=self.use_jetid_correction,
+                require_muon=False,
+            ), dtype=bool)
+            rmask &= tight
+            if rmask.sum() == 0:
+                continue
+            for cat, cmask in cat_masks.items():
+                sel = rmask & cmask
+                ns = int(sel.sum())
+                out["counts"][f"{region}/{cat}"] += ns
+                if ns == 0:
+                    continue
+                for vname in VAR_SPECS:
+                    out[f"h_{vname}"].fill(region=region, cat=cat,
+                                           val=val_by_var[vname][sel])
         return out
 
     def postprocess(self, accumulator):
@@ -178,8 +202,6 @@ def load_signal_fileset(year: str, sample: str, quick_files):
         raise FileNotFoundError(f"{json_path} missing — check signal-sample name.")
     with open(json_path) as f:
         sample_dict = json.load(f)
-    # Sample JSONs may have multiple dataset keys (e.g. different mass points).
-    # Round-robin so quick-mode sees all of them.
     sublists = [list(v) for v in sample_dict.values() if isinstance(v, list)]
     if quick_files:
         files = round_robin_sample_lists(sublists, quick_files)
@@ -189,85 +211,81 @@ def load_signal_fileset(year: str, sample: str, quick_files):
 
 
 # ---------------------------------------------------------------------------
-# Output (CSV + plot)
+# Output (CSV + plots), per region
 # ---------------------------------------------------------------------------
-def write_outputs(out_mc, year, sample, current_triggers, candidate_triggers, save_dir):
-    os.makedirs(save_dir, exist_ok=True)
+def _r(x):
+    try:
+        return round(float(x), 4)
+    except Exception:
+        return 0.0
+
+
+def write_outputs(out, year, sample, current_triggers, candidate_triggers, save_base):
     all_triggers = current_triggers + candidate_triggers
 
-    base = int(out_mc["counts"]["baseline"])
-    rows = []
+    for region in REGIONS:
+        save_dir = os.path.join(save_base, region)
+        os.makedirs(save_dir, exist_ok=True)
+        base = int(out["counts"].get(f"{region}/baseline", 0))
 
-    def _r(x):
-        try: return round(float(x), 4)
-        except Exception: return 0.0
+        # ---- CSV ----
+        def row(label, k):
+            e, ue = binomial_eff_err(k, base) if base else (0.0, 0.0)
+            return {"label": label, "pass": int(k), "total": int(base),
+                    "eff": _r(e), "eff_err": _r(ue)}
 
-    def row(label, k):
-        e, ue = binomial_eff_err(k, base) if base else (0.0, 0.0)
-        return {
-            "label": label,
-            "pass":  int(k),
-            "total": int(base),
-            "eff":   _r(e),
-            "eff_err": _r(ue),
-        }
+        rows = []
+        for t in all_triggers:
+            tag = "current" if t in current_triggers else "candidate"
+            rows.append({"group": tag, **row(t, out["counts"].get(f"{region}/trig_{t}", 0))})
+        for name in ["current_OR", "augmented_OR", "gain_new_only"]:
+            rows.append({"group": "summary", **row(name, out["counts"].get(f"{region}/{name}", 0))})
 
-    for t in all_triggers:
-        tag = "current" if t in current_triggers else "candidate"
-        rows.append({"group": tag, **row(t, out_mc["counts"][f"trig_{t}"])})
-    for name in ["current_OR", "augmented_OR", "gain_new_only"]:
-        rows.append({"group": "summary", **row(name, out_mc["counts"][name])})
+        csv_path = os.path.join(save_dir, "per_trigger_efficiency.csv")
+        headers = ["group", "label", "pass", "total", "eff", "eff_err"]
+        with open(csv_path, "w") as f:
+            f.write(",".join(headers) + "\n")
+            for r in rows:
+                f.write(",".join(str(r[h]) for h in headers) + "\n")
 
-    csv_path = os.path.join(save_dir, "per_trigger_efficiency.csv")
-    headers = ["group", "label", "pass", "total", "eff", "eff_err"]
-    with open(csv_path, "w") as f:
-        f.write(",".join(headers) + "\n")
-        for r in rows:
-            f.write(",".join(str(r[h]) for h in headers) + "\n")
-    print(f"  wrote {csv_path}")
+        # Headline to stdout
+        cur = next(r for r in rows if r["label"] == "current_OR")
+        aug = next(r for r in rows if r["label"] == "augmented_OR")
+        print(f"  [{region:9s}] base={base:6d}  current_OR={cur['eff']*100:6.2f}%  "
+              f"augmented_OR={aug['eff']*100:6.2f}%  (+{(aug['eff']-cur['eff'])*100:.2f}%)")
 
-    # Headline
-    print("\n--- Headline ---")
-    print(f"{'category':24s}  {'pass/total':>16s}  {'eff':>14s}")
-    for r in rows:
-        if r["group"] == "summary":
-            print(f"  {r['label']:24s}  {r['pass']:>7d}/{r['total']:<8d}  {r['eff']*100:6.2f}% +- {r['eff_err']*100:5.2f}%")
+        if base == 0:
+            continue  # no plots for an empty region
 
-    cur = next(r for r in rows if r["label"] == "current_OR")
-    aug = next(r for r in rows if r["label"] == "augmented_OR")
-    print(f"\n  {sample} {year}: current_OR -> augmented_OR  "
-          f"{cur['eff']*100:.2f}% -> {aug['eff']*100:.2f}%  "
-          f"(+{(aug['eff']-cur['eff'])*100:.2f}%)")
-
-    # Plot
-    fig, ax = plt.subplots(figsize=(8, 6))
-    base_vals = out_mc["h_pt"][{"cat": "baseline"}].values()
-    edges = out_mc["h_pt"].axes[1].edges
-    centers = 0.5 * (edges[:-1] + edges[1:])
-    for cat, color, ls in [
-        ("current_OR",    "C0", "-"),
-        ("augmented_OR",  "C3", "-"),
-        ("gain_new_only", "C2", "--"),
-    ]:
-        num = out_mc["h_pt"][{"cat": cat}].values()
-        with np.errstate(invalid="ignore", divide="ignore"):
-            eff = np.where(base_vals > 0, num / base_vals, 0.0)
-            err = np.where(base_vals > 0,
-                           np.sqrt(eff * (1 - eff) / np.maximum(base_vals, 1)),
-                           0.0)
-        ax.errorbar(centers, eff, yerr=err, fmt="o-" if ls == "-" else "o--",
-                    color=color, label=cat, capsize=2)
-    ax.set_xlabel("Leading AK8 jet $p_T$ [GeV]")
-    ax.set_ylabel("Trigger efficiency")
-    ax.set_title(f"{sample} signal MC ({year})  ·  baseline pT > 450, mSD > 40")
-    ax.set_ylim(0, 1.05)
-    ax.grid(alpha=0.3)
-    ax.legend(loc="lower right", fontsize=10)
-    fig.tight_layout()
-    png_path = os.path.join(save_dir, "eff_vs_pt.png")
-    fig.savefig(png_path, dpi=110)
-    plt.close(fig)
-    print(f"  wrote {png_path}")
+        # ---- plots: eff vs each variable ----
+        for vname, (vaxis, vlabel) in VAR_SPECS.items():
+            h = out[f"h_{vname}"]
+            edges = h.axes[2].edges
+            centers = 0.5 * (edges[:-1] + edges[1:])
+            base_vals = h[{"region": region, "cat": "baseline"}].values()
+            fig, ax = plt.subplots(figsize=(8, 6))
+            for cat, color, ls in [("current_OR", "C0", "-"),
+                                    ("augmented_OR", "C3", "-"),
+                                    ("gain_new_only", "C2", "--")]:
+                num = h[{"region": region, "cat": cat}].values()
+                with np.errstate(invalid="ignore", divide="ignore"):
+                    eff = np.where(base_vals > 0, num / base_vals, 0.0)
+                    err = np.where(base_vals > 0,
+                                   np.sqrt(np.clip(eff * (1 - eff), 0, None) / np.maximum(base_vals, 1)),
+                                   0.0)
+                ax.errorbar(centers, eff, yerr=err,
+                            fmt="o-" if ls == "-" else "o--",
+                            color=color, label=cat, capsize=2)
+            ax.set_xlabel(vlabel)
+            ax.set_ylabel("Trigger efficiency")
+            ax.set_title(f"{sample} {year} · {region} · baseline pT>450, mSD>40")
+            ax.set_ylim(0, 1.05)
+            ax.grid(alpha=0.3)
+            ax.legend(loc="lower right", fontsize=9)
+            fig.tight_layout()
+            fig.savefig(os.path.join(save_dir, f"eff_vs_{vname}.png"), dpi=110)
+            plt.close(fig)
+        print(f"    wrote {save_dir}/{{per_trigger_efficiency.csv, eff_vs_pt.png, eff_vs_msd.png, eff_vs_score.png}}")
 
 
 # ---------------------------------------------------------------------------
@@ -288,19 +306,12 @@ def main():
     p.add_argument("--probe-pt-min", type=float, default=None)
     p.add_argument("--probe-ht-min", type=float, default=None)
     p.add_argument("--candidates", default=None,
-                   help="Comma-separated trigger names (without HLT_ prefix) to use as the "
-                        "candidate-OR overlay, replacing the default from study_extra_triggers. "
-                        "Example: --candidates VBF_DiPFJet125_45_Mjj720_Detajj3p0")
+                   help="Comma-separated trigger names (no HLT_ prefix) to use as the "
+                        "candidate-OR overlay, replacing the default from study_extra_triggers.")
     args = p.parse_args()
 
     samples = ["ggF", "VBF"] if args.sample == "both" else [args.sample]
     current_triggers = CURRENT_TRIGGERS_BY_YEAR[args.year]
-
-    # Allow --candidates to override the default CANDIDATE_TRIGGERS list. Useful
-    # when the previous candidates are already in `trigger_dict_periods` (so
-    # they'd be a subset of current_triggers and the gain_new_only column would
-    # be trivially zero) and you want to compare against a different candidate
-    # set, e.g. just HLT_VBF_DiPFJet125_45_Mjj720_Detajj3p0.
     if args.candidates:
         candidate_triggers = [t.strip() for t in args.candidates.split(",") if t.strip()]
     else:
@@ -309,6 +320,8 @@ def main():
     print(f"=== Signal-MC trigger eff: year={args.year}, samples={samples} ===")
     print(f"  current OR: {current_triggers}")
     print(f"  candidates: {candidate_triggers}")
+    print(f"  regions:    {REGIONS}")
+    print(f"  variables:  pT, mSD, Xbb+Xcc score")
     print(f"  baseline:   pT > 450, mSD > 40 (no muon veto, no ref trigger)")
     if args.probe_pt_min or args.probe_ht_min:
         print(f"  extra cuts: pT > {args.probe_pt_min}, HT > {args.probe_ht_min}")
@@ -325,11 +338,11 @@ def main():
     )
 
     for sample in samples:
-        save_dir = os.path.join(args.out_base, args.year, sample)
+        save_base = os.path.join(args.out_base, args.year, sample)
         files = load_signal_fileset(args.year, sample, args.quick_files)
         print(f"\n--- {sample}: {len(files)} files ---")
         if not files:
-            print(f"  (no files; skipping)")
+            print("  (no files; skipping)")
             continue
 
         proc = SignalEffProcessor(
@@ -340,7 +353,6 @@ def main():
             probe_pt_min=args.probe_pt_min,
             probe_ht_min=args.probe_ht_min,
         )
-
         try:
             out = runner({f"{sample}_{args.year}": files}, treename="Events",
                          processor_instance=proc)
@@ -352,7 +364,7 @@ def main():
             continue
 
         write_outputs(out[0], args.year, sample, current_triggers,
-                      candidate_triggers, save_dir=save_dir)
+                      candidate_triggers, save_base=save_base)
 
 
 if __name__ == "__main__":
