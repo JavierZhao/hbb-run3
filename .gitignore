@@ -32,6 +32,7 @@ condor_sf/sf_2d_2022/
 condor_sf/sf_2d_2022EE/
 condor_sf/sf_2d_2023/
 condor_sf/sf_2d_2023BPix/
+condor_sf/sf_2d_2024/
 condor_sf/sf_TTto4Q/
 condor_sf/trig_eff_2d_2022/
 condor_sf/trig_eff_2d_2022EE/
@@ -62,6 +63,7 @@ condor_sf/signal_eff_*/
 
 # --- Per-file backups created by rewrite_redirector.py and similar ---
 *.json.bak
+*.json.bak.*
 
 # --- Legacy / scratch ---
 old_runs/

@@ -21,6 +21,8 @@ while [[ $# -gt 0 ]]; do
     --txbb-region) TXBB_REGION="--txbb-region $2"; shift 2 ;;
     --no-recoverable) EXTRA_FLAGS="${EXTRA_FLAGS} --no-recoverable"; shift ;;
     --workers) EXTRA_FLAGS="${EXTRA_FLAGS} --workers $2"; shift 2 ;;
+    --mc-keys-filter) EXTRA_FLAGS="${EXTRA_FLAGS} --mc-keys-filter $2"; shift 2 ;;
+    --mc-output-suffix) EXTRA_FLAGS="${EXTRA_FLAGS} --mc-output-suffix $2"; shift 2 ;;
     -p|--python) PYTHON_BIN="$2"; shift 2 ;;
     -h|--help)
       echo "Usage: $0 [-y|--year 2022] [--test] [--mc-sample ttbar|qcd_muenriched] [--txbb-region all|fail|pass_bb|pass_cc] [-p|--python python3]"

@@ -8,10 +8,10 @@ set -euo pipefail
 YEAR="${1:-2023}"
 
 # Validate year
-if [[ ! "$YEAR" =~ ^(2022|2022EE|2023|2023BPix)$ ]]; then
+if [[ ! "$YEAR" =~ ^(2022|2022EE|2023|2023BPix|2024)$ ]]; then
   echo "Error: Invalid year '$YEAR'"
   echo "Usage: $0 [YEAR]"
-  echo "  YEAR: 2022, 2022EE, 2023, or 2023BPix (default: 2023)"
+  echo "  YEAR: 2022, 2022EE, 2023, 2023BPix, or 2024 (default: 2023)"
   exit 1
 fi
 
