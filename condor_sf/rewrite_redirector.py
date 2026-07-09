@@ -6,6 +6,15 @@ the FNAL-local redirector `cmsxrootd.fnal.gov`. The CMS global redirector
 (`cms-xrd-global.cern.ch`) routes to any storage site that hosts a replica
 and tends to recover from FNAL-local outages.
 
+The 2024 infiles JSONs ship with FNAL dcache-disk URLs that include an extra
+absolute prefix, e.g.
+    root://cmsdcadisk.fnal.gov//dcache/uscmsdisk/store/mc/...
+A pure-host swap leaves the bogus `/dcache/uscmsdisk/` between the new
+redirector and the LFN, so xrootd cannot resolve it. The rewriter therefore
+always normalizes to the LFN (everything from `/store/` onward) before
+prepending the new redirector, regardless of what junk came in front of
+`/store/`.
+
 Default behavior is non-destructive: writes to <input>_global.json next to
 the original. Pass --inplace to overwrite.
 
@@ -23,14 +32,20 @@ import os
 import re
 import sys
 
-REDIRECTOR_RE = re.compile(r"^root://[^/]+//")
+# Match any xrootd URL pointing at a CMS-LFN. Captures from /store/ onward as
+# the LFN, regardless of what host/junk precedes it (handles cmsdcadisk-style
+# /dcache/uscmsdisk/store/... paths too).
+XROOTD_LFN_RE = re.compile(r"^root://[^/]+/.*?(/store/.+)$")
 
 
 def rewrite_value(val, new_prefix: str):
     """Rewrite a single URL or a list of URLs. Returns (new_value, n_changed)."""
     if isinstance(val, str):
-        if REDIRECTOR_RE.match(val):
-            new_val = REDIRECTOR_RE.sub(new_prefix, val)
+        m = XROOTD_LFN_RE.match(val)
+        if m:
+            # new_prefix already ends in '//'; the LFN starts with '/'.
+            # Strip the trailing slash from new_prefix to avoid '///store/...'.
+            new_val = new_prefix.rstrip("/") + "/" + m.group(1)
             return new_val, 1 if new_val != val else 0
         return val, 0
     if isinstance(val, list):
