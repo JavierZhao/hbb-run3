@@ -28,6 +28,9 @@ mpl.rcParams['lines.linewidth'] = 5
 import itertools
 import json
 
+# JetID + jet-veto-map helpers (for v15 / 2024 NanoAOD that often lack jetId).
+from corrections import JET_VETOMAP_KEYS, correct_jetid, event_passes_jet_veto_map
+
 
 # txbb+txcc working point for pass/fail region split
 TXBB_WP = 0.82
@@ -48,7 +51,11 @@ POG_YEARS = {
     "2022EE": "2022_Summer22EE",
     "2023": "2023_Summer23",
     "2023BPix": "2023_Summer23BPix",
+    "2024": "2024_Summer24",
 }
+
+# Years where NanoAOD often lacks jetId; use POG jetid.json.gz via correctionlib.
+_JETID_CORRECTION_YEARS = {"2023", "2023BPix", "2024"}
 
 _JETID_FALLBACK_WARNED = False
 
@@ -172,32 +179,97 @@ def get_xcc_score(jets):
     return ak.zeros_like(jets.pt)
 
 
+def _fallback_jetid_tight_mask(jets):
+    """NanoAOD jetId bitmask when the branch exists (pre-v15 style).
+
+    v15 / 2024 NanoAOD often lacks the jetId branch entirely. In that case the
+    only correct behavior is to fail loudly, since silently passing every jet
+    would bias the trigger probe. Callers must have a correctionlib evaluator
+    available for years where jetId is absent.
+    """
+    if "jetId" in jets.fields:
+        return jets.isTight
+    raise RuntimeError(
+        "Cannot compute tight JetID: no jetId branch and correctionlib evaluation failed."
+    )
+
+
+def _evaluate_jetid_tight(evaluator, corr_name, flat_jets):
+    """Evaluate POG tight JetID; scalar-loop fallback for older correctionlib schemas."""
+    def real_col(x):
+        x = ak.fill_none(x, 0.0)
+        a = np.asarray(ak.to_numpy(x), dtype=np.float64, order="C")
+        np.nan_to_num(a, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
+        return a
+
+    def int_col(x):
+        x = ak.fill_none(x, 0)
+        return np.asarray(ak.to_numpy(x), dtype=np.int64, order="C")
+
+    eta = np.clip(real_col(flat_jets.eta), -4.7, 4.7)
+    chHEF = np.clip(real_col(flat_jets.chHEF), 0.0, 1.0)
+    neHEF = np.clip(real_col(flat_jets.neHEF), 0.0, 1.0)
+    chEmEF = np.clip(real_col(flat_jets.chEmEF), 0.0, 1.0)
+    neEmEF = np.clip(real_col(flat_jets.neEmEF), 0.0, 1.0)
+    muEF = np.clip(real_col(flat_jets.muEF), 0.0, 1.0)
+    chMult = np.clip(int_col(flat_jets.chMultiplicity), 0, 100)
+    neMult = np.clip(int_col(flat_jets.neMultiplicity), 0, 100)
+    nConst = chMult + neMult
+
+    if nConst.size == 0:
+        return np.array([], dtype=bool)
+
+    corr = evaluator[corr_name]
+    try:
+        mask_flat = np.asarray(
+            corr.evaluate(eta, chHEF, neHEF, chEmEF, neEmEF, muEF, chMult, neMult, nConst),
+            dtype=bool,
+        )
+    except RuntimeError:
+        mask_flat = np.empty(nConst.size, dtype=bool)
+        for i in range(nConst.size):
+            mask_flat[i] = bool(
+                corr.evaluate(
+                    float(eta[i]),
+                    float(chHEF[i]),
+                    float(neHEF[i]),
+                    float(chEmEF[i]),
+                    float(neEmEF[i]),
+                    float(muEF[i]),
+                    int(chMult[i]),
+                    int(neMult[i]),
+                    int(nConst[i]),
+                )
+            )
+    return mask_flat
+
+
 def corrected_jetid_tight_mask(jets, jet_type, year, use_jetid_correction=True):
     """
-    For v14+ periods (2023/2023BPix), compute Tight JetID from correctionlib.
-    Falls back to NanoAOD isTight if correction payload/inputs are unavailable.
+    For v14+ / 2024 NanoAOD, compute Tight JetID from correctionlib (jetId often absent).
+    Falls back to NanoAOD isTight only when the jetId branch is present.
     """
     global _JETID_FALLBACK_WARNED
 
-    if not use_jetid_correction or year not in {"2023", "2023BPix"}:
-        return jets.isTight
+    if not use_jetid_correction or year not in _JETID_CORRECTION_YEARS:
+        return _fallback_jetid_tight_mask(jets)
 
     if jet_type == "AK8":
         corr_name = "AK8PUPPI_Tight"
     elif jet_type == "AK4":
         corr_name = "AK4PUPPI_Tight"
     else:
-        return jets.isTight
+        return _fallback_jetid_tight_mask(jets)
 
     required_fields = {
         "eta", "chHEF", "neHEF", "chEmEF", "neEmEF", "muEF",
-        "chMultiplicity", "neMultiplicity"
+        "chMultiplicity", "neMultiplicity",
     }
     if not required_fields.issubset(set(jets.fields)):
         if not _JETID_FALLBACK_WARNED:
-            print("Warning: missing JetID input branches. Falling back to NanoAOD isTight.")
+            print("Warning: missing JetID input branches; cannot apply correctionlib JetID.")
             _JETID_FALLBACK_WARNED = True
-        return jets.isTight
+        return _fallback_jetid_tight_mask(jets)
 
     try:
         import correctionlib  # local import to keep script usable when unavailable
@@ -205,26 +277,13 @@ def corrected_jetid_tight_mask(jets, jet_type, year, use_jetid_correction=True):
         evaluator = correctionlib.CorrectionSet.from_file(get_pog_json("jetid", year))
         flat_jets = ak.flatten(jets)
         njets = ak.num(jets)
-
-        eta = ak_clip(flat_jets.eta, -4.7, 4.7)
-        chHEF = ak_clip(flat_jets.chHEF, 0.0, 1.0)
-        neHEF = ak_clip(flat_jets.neHEF, 0.0, 1.0)
-        chEmEF = ak_clip(flat_jets.chEmEF, 0.0, 1.0)
-        neEmEF = ak_clip(flat_jets.neEmEF, 0.0, 1.0)
-        muEF = ak_clip(flat_jets.muEF, 0.0, 1.0)
-        chMult = ak_clip(flat_jets.chMultiplicity, 0.0, 100.0)
-        neMult = ak_clip(flat_jets.neMultiplicity, 0.0, 100.0)
-        nConst = chMult + neMult
-
-        mask_flat = evaluator[corr_name].evaluate(
-            eta, chHEF, neHEF, chEmEF, neEmEF, muEF, chMult, neMult, nConst
-        )
+        mask_flat = _evaluate_jetid_tight(evaluator, corr_name, flat_jets)
         return ak.values_astype(ak.unflatten(mask_flat, njets), bool)
     except Exception as exc:
         if not _JETID_FALLBACK_WARNED:
-            print(f"Warning: JetID correction unavailable ({exc}). Falling back to NanoAOD isTight.")
+            print(f"Warning: JetID correction unavailable ({exc}).")
             _JETID_FALLBACK_WARNED = True
-        return jets.isTight
+        return _fallback_jetid_tight_mask(jets)
 
 
 def round_robin_sample_lists(list_of_lists, n_total):
@@ -310,7 +369,19 @@ trigger_dict_periods = {
         'PFHT1050',
         # VBF_DiPFJet125_45_Mjj720_Detajj3p0 uses a different calibration strategy.
         # It is also in ParkingVBF stream only and not stored in Muon0 PD for Run2023D.
-    ]
+    ],
+    '2024': [
+        # 2024 NanoAODv15 HLT menu: 4 of the 5 names match 2023/2023BPix.
+        # AK8PFJet425_SoftDropMass40 is NOT in the 2024 menu; the equivalent
+        # leg is AK8PFJet425_SoftDropMass30 (same pT threshold, looser mSD
+        # cut). Verified via probe_2024_ak8_triggers.py on 2026-05-29 across
+        # Muon0_Run2024C/F/H/I, TTtoLNu2Q, and QCD_MuEnriched_PT_300to470.
+        'AK8PFJet250_SoftDropMass40_PNetBB0p06',
+        'PFHT340_QuadPFJet70_50_40_40_PNet2BTagMean0p70',
+        'PFJet500',
+        'AK8PFJet425_SoftDropMass30',
+        'PFHT1050',
+    ],
 }
 
 # Muon reference triggers for SF calculation
@@ -319,6 +390,7 @@ muon_triggers = {
     '2022EE': ["HLT_Mu50", "HLT_CascadeMu100", "HLT_HighPtTkMu100", "HLT_IsoMu24"],
     '2023': ["HLT_Mu50", "HLT_CascadeMu100", "HLT_HighPtTkMu100", "HLT_IsoMu24"],
     '2023BPix': ["HLT_Mu50", "HLT_CascadeMu100", "HLT_HighPtTkMu100", "HLT_IsoMu24"],
+    '2024': ["HLT_Mu50", "HLT_CascadeMu100", "HLT_HighPtTkMu100", "HLT_IsoMu24"],
 }
 
 def create_baseline_selection_mask_new(events, tag, year, txbb_region='inclusive', use_jetid_correction=True, require_muon=True):
@@ -1457,6 +1529,16 @@ if __name__ == "__main__":
                              "result trees side-by-side under <mc_sample>/ subdirectories.")
     parser.add_argument('--outdir', default='.',
                         help="Base output directory. Results are saved under <outdir>/figures_sf_2d and <outdir>/output.")
+    parser.add_argument('--mc-keys-filter', default=None,
+                        help="Optional regex; when --mc-sample resolves to a list of dataset keys "
+                             "(e.g. the 12 QCD_MuEnriched pT bins), keep only keys matching this "
+                             "regex. Used to split a large MC sample across multiple condor jobs by "
+                             "pT bin. Example: --mc-keys-filter '^QCD_MuEnriched_PT_300to470$'.")
+    parser.add_argument('--mc-output-suffix', default='',
+                        help="Suffix to append to coffea/CSV/figure output filenames so multiple "
+                             "--mc-keys-filter sub-jobs of the same year/region/mc don't clobber each "
+                             "other. Example: '_PT_300to470'. Empty string (default) leaves names "
+                             "unchanged for backwards compatibility.")
     args = parser.parse_args()
 
     year = args.year
@@ -1510,10 +1592,25 @@ if __name__ == "__main__":
             "Muon0_Run2023D-v1", "Muon0_Run2023D-v2",
             "Muon1_Run2023D-v1", "Muon1_Run2023D-v2",
         ],
+        '2024': [
+            # NB: 2024 has separate Muon0 and Muon1 PDs (like 2023). The coworker's
+            # original JSON mashed both into the Muon0_* keys; we split them out
+            # on 2026-06-03 to match the 2022/2023 pipeline. No Muon1_Run2024H
+            # because that era's NanoAOD only carries Muon0 PD.
+            "Muon0_Run2024C", "Muon0_Run2024D", "Muon0_Run2024E",
+            "Muon0_Run2024F", "Muon0_Run2024G", "Muon0_Run2024H", "Muon0_Run2024I",
+            "Muon1_Run2024C", "Muon1_Run2024D", "Muon1_Run2024E",
+            "Muon1_Run2024F", "Muon1_Run2024G", "Muon1_Run2024I",
+        ],
     }
 
     def _resolve_mc_source(mc_sample):
-        """Map --mc-sample value -> (dataset_type for infile JSON, file_key string-or-list)."""
+        """Map --mc-sample value -> (dataset_type for infile JSON, file_key string-or-list).
+
+        When --mc-keys-filter is set and the resolved key set is a list (e.g. the
+        12 QCD_MuEnriched pT bins), apply the regex filter to it. Used by
+        submit_sf_2d_qcd_ptbin.sh to fan one slow QCD job into 12 sub-jobs.
+        """
         if mc_sample == 'ttbar':
             return 'ttbar', "TTtoLNu2Q"
         if mc_sample == 'qcd_muenriched':
@@ -1524,7 +1621,18 @@ if __name__ == "__main__":
                     "run make_qcd_muenriched_infiles.py after voms-proxy-init."
                 )
             with open(qcd_json_path) as _f:
-                return 'QCD_MuEnriched', list(json.load(_f).keys())
+                keys = list(json.load(_f).keys())
+            if args.mc_keys_filter:
+                import re as _re
+                pat = _re.compile(args.mc_keys_filter)
+                kept = [k for k in keys if pat.search(k)]
+                if not kept:
+                    raise ValueError(
+                        f"--mc-keys-filter {args.mc_keys_filter!r} matched none of {keys}"
+                    )
+                print(f"--mc-keys-filter kept {len(kept)} / {len(keys)} keys: {kept}")
+                keys = kept
+            return 'QCD_MuEnriched', keys
         raise ValueError(f"Unknown mc-sample: {mc_sample}")
 
     if args.mc_sample == 'both':
@@ -1724,16 +1832,25 @@ if __name__ == "__main__":
 
             # Output paths include txbb_region AND mc_sample so the ttbar and
             # qcd_muenriched results live side-by-side without clobbering.
-            FIGURES_DIR = os.path.join(figures_base_dir, year, prod_mode, txbb_region, mc_sample)
+            # --mc-output-suffix lets pT-bin sub-jobs land alongside each other.
+            mc_suffix = getattr(args, 'mc_output_suffix', '') or ''
+            FIGURES_DIR = os.path.join(figures_base_dir, year, prod_mode, txbb_region, mc_sample + mc_suffix)
             os.makedirs(FIGURES_DIR, exist_ok=True)
 
-            output_path_data = os.path.join(output_base_dir, f"sf_2d_{year}_{prod_mode}_{txbb_region}_{mc_sample}_data.coffea")
-            output_path_mc   = os.path.join(output_base_dir, f"sf_2d_{year}_{prod_mode}_{txbb_region}_{mc_sample}_mc.coffea")
+            output_path_data = os.path.join(output_base_dir, f"sf_2d_{year}_{prod_mode}_{txbb_region}_{mc_sample}{mc_suffix}_data.coffea")
+            output_path_mc   = os.path.join(output_base_dir, f"sf_2d_{year}_{prod_mode}_{txbb_region}_{mc_sample}{mc_suffix}_mc.coffea")
+            # Per-era dict so regenerate_csv_from_coffea.py can rebuild the
+            # per-era CSVs from disk. The merged output_data alone loses the
+            # era split; without this file the per-era CSVs would need to be
+            # generated in-process (as they are here in generate_per_era_...).
+            output_path_per_era = os.path.join(output_base_dir, f"sf_2d_{year}_{prod_mode}_{txbb_region}_{mc_sample}{mc_suffix}_per_era.coffea")
             os.makedirs(os.path.dirname(output_path_data), exist_ok=True)
 
             util.save(output_data, output_path_data)
+            util.save(per_era_data, output_path_per_era)
             util.save(output_mc,   output_path_mc)
             print(f"Saved data output to {output_path_data}")
+            print(f"Saved per-era coffea to {output_path_per_era}")
             print(f"Saved MC output   to {output_path_mc}")
 
             plot_2d_scale_factors(
@@ -1770,14 +1887,14 @@ if __name__ == "__main__":
             )
             print(f"\nAll plots saved to {FIGURES_DIR}")
 
-            csv_output_dir = os.path.join(output_base_dir, year, prod_mode, txbb_region, mc_sample)
+            csv_output_dir = os.path.join(output_base_dir, year, prod_mode, txbb_region, mc_sample + mc_suffix)
             os.makedirs(csv_output_dir, exist_ok=True)
 
             generate_per_trigger_efficiency_csv(
                 output_data, output_mc, trig_vars_2d,
                 triggers=trigger_dict_periods[year],
                 save_dir=csv_output_dir,
-                year=f"{year}_{prod_mode}_{txbb_region}_{mc_sample}",
+                year=f"{year}_{prod_mode}_{txbb_region}_{mc_sample}{mc_suffix}",
                 pt_min=pt_min_csv,
                 pt_max=pt_max_csv,
                 msd_min=msd_min_csv,
@@ -1791,7 +1908,7 @@ if __name__ == "__main__":
                     per_era_data, output_mc, trig_vars_2d,
                     triggers=trigger_dict_periods[year],
                     save_dir=csv_output_dir,
-                    year=f"{year}_{prod_mode}_{txbb_region}_{mc_sample}",
+                    year=f"{year}_{prod_mode}_{txbb_region}_{mc_sample}{mc_suffix}",
                     pt_min=pt_min_csv,
                     pt_max=pt_max_csv,
                     msd_min=msd_min_csv,
