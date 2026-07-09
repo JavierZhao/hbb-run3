@@ -1,0 +1,29 @@
+# JDL to run merge_sf_2d_qcd_ptbin.py inside the coffea apptainer.
+# Usage:
+#   condor_submit merge_qcd-condor.jdl YEAR=2024 REGION=all
+#   condor_submit merge_qcd-condor.jdl YEAR=2024 REGION=fail
+#
+# Transfers the merge script + the per-bin coffea outputs back to the submit
+# dir; brings the merged coffea + canonical CSV/figures to disk.
+
+universe                = vanilla
+Executable              = shell
+should_transfer_files   = YES
+when_to_transfer_output = ON_EXIT
+transfer_input_files    = shell, merge_sf_2d_qcd_ptbin.py, sf_2d_$(YEAR)/output
+stream_output           = True
+stream_error            = True
+on_exit_remove          = (ExitBySignal == False) && (ExitCode == 0)
+max_retries             = 1
+request_memory          = 4 GB
+
+# Bring back ONLY the newly-merged canonical files (not the per-bin ones we already have)
+transfer_output_files   = output
+transfer_output_remaps  = "output=sf_2d_$(YEAR)/output"
+
+Output                  = sf_2d_$(YEAR)/merge_$(Cluster)_$(Process).out
+Error                   = sf_2d_$(YEAR)/merge_$(Cluster)_$(Process).err
+Log                     = sf_2d_$(YEAR)/merge_$(Cluster)_$(Process).log
+
+Arguments               = coffeateam/coffea-dask-almalinux8:2025.10.2-py3.10 python3 merge_sf_2d_qcd_ptbin.py --year $(YEAR) --region $(REGION:all) --out-dir output
+Queue 1

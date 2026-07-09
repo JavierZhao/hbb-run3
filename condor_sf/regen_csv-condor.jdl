@@ -1,0 +1,21 @@
+# Tiny JDL to regenerate per-trigger CSV from merged coffea.
+universe                = vanilla
+Executable              = shell
+should_transfer_files   = YES
+when_to_transfer_output = ON_EXIT
+transfer_input_files    = shell, regenerate_csv_from_coffea.py, scale_factor_2d.py, corrections.py, sf_2d_$(YEAR)/output
+stream_output           = True
+stream_error            = True
+on_exit_remove          = (ExitBySignal == False) && (ExitCode == 0)
+max_retries             = 1
+request_memory          = 4 GB
+
+transfer_output_files   = output
+transfer_output_remaps  = "output=sf_2d_$(YEAR)/output"
+
+Output                  = sf_2d_$(YEAR)/regen_$(Cluster)_$(Process).out
+Error                   = sf_2d_$(YEAR)/regen_$(Cluster)_$(Process).err
+Log                     = sf_2d_$(YEAR)/regen_$(Cluster)_$(Process).log
+
+Arguments               = coffeateam/coffea-dask-almalinux8:2025.10.2-py3.10 python3 regenerate_csv_from_coffea.py --year $(YEAR) --region $(REGION:all) --mc-sample $(MC_SAMPLE:qcd_muenriched) --out-dir output
+Queue 1

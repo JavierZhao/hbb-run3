@@ -14,12 +14,24 @@ Output (one per period):
     infiles/2022EE/2022EE_QCD_MuEnriched.json
     infiles/2023/2023_QCD_MuEnriched.json
     infiles/2023BPix/2023BPix_QCD_MuEnriched.json
+    infiles/2024/2024_QCD_MuEnriched.json
 
 Note: the boosted Hbb analysis baseline is jet pT > 300 GeV, so only the
 PT-300to470 and higher bins matter in practice. Lower bins are still queried
 so the JSON can be reused for other studies.
+
+2024 caveat: the MC dataset naming convention changed for the
+RunIII2024Summer24NanoAODv15 campaign. Old (2022/2023) DAS names follow
+    /QCD_PT-<bin>_MuEnrichedPt5_TuneCP5_13p6TeV_pythia8/<campaign>-*/NANOAODSIM
+New (2024) names follow
+    /QCD_Bin-PT-<bin>_Fil-MuEnriched_TuneCP5_13p6TeV_pythia8/<campaign>-*/NANOAODSIM
+We branch on the period to pick the right pattern.
+
+Pass `--periods 2024` (or any space-separated list) to limit the run to specific
+periods; default is all four (legacy) + 2024.
 """
 
+import argparse
 import json
 import os
 import subprocess
@@ -27,7 +39,7 @@ import sys
 
 XROOTD_PREFIX = "root://cmsxrootd.fnal.gov/"
 
-# Standard pT bin labels for the MuEnrichedPt5 samples.
+# Standard pT bin labels for the MuEnriched samples.
 # The highest bin uses 'PT-1000' (no upper bound).
 PT_BINS = [
     "PT-15to20",   "PT-20to30",   "PT-30to50",   "PT-50to80",
@@ -35,13 +47,34 @@ PT_BINS = [
     "PT-470to600", "PT-600to800", "PT-800to1000", "PT-1000",
 ]
 
-# Map analysis period -> (campaign string, mc-condition string used in DAS)
+# Map analysis period -> (campaign string, mc-condition string used in DAS).
+# 2024 added on 2026-05-29 — uses new "Bin-PT_..._Fil-MuEnriched" naming convention
+# (see DATASET_PATTERN_BY_PERIOD below).
 CAMPAIGNS = {
-    '2022':     ('Run3Summer22NanoAODv12',     '130X_mcRun3_2022_realistic_v5'),
-    '2022EE':   ('Run3Summer22EENanoAODv12',   '130X_mcRun3_2022_realistic_postEE_v6'),
-    '2023':     ('Run3Summer23NanoAODv12',     '130X_mcRun3_2023_realistic_v14'),
-    '2023BPix': ('Run3Summer23BPixNanoAODv12', '130X_mcRun3_2023_realistic_postBPix_v2'),
+    '2022':     ('Run3Summer22NanoAODv12',         '130X_mcRun3_2022_realistic_v5'),
+    '2022EE':   ('Run3Summer22EENanoAODv12',       '130X_mcRun3_2022_realistic_postEE_v6'),
+    '2023':     ('Run3Summer23NanoAODv12',         '130X_mcRun3_2023_realistic_v14'),
+    '2023BPix': ('Run3Summer23BPixNanoAODv12',     '130X_mcRun3_2023_realistic_postBPix_v2'),
+    '2024':     ('RunIII2024Summer24NanoAODv15',   '150X_mcRun3_2024_realistic_v2'),
 }
+
+# Two distinct dataset-name conventions are in use across the Run 3 campaigns.
+# 2024 (NanoAODv15) re-labeled QCD MC files as `QCD_Bin-PT-..._Fil-MuEnriched`,
+# while 2022/2023 (NanoAODv12) still use the legacy `QCD_PT-..._MuEnrichedPt5`.
+LEGACY_DATASET = "/QCD_{pt}_MuEnrichedPt5_TuneCP5_13p6TeV_pythia8/{campaign}-*/NANOAODSIM"
+V15_DATASET    = "/QCD_Bin-{pt}_Fil-MuEnriched_TuneCP5_13p6TeV_pythia8/{campaign}-*/NANOAODSIM"
+
+DATASET_PATTERN_BY_PERIOD = {
+    '2022':     LEGACY_DATASET,
+    '2022EE':   LEGACY_DATASET,
+    '2023':     LEGACY_DATASET,
+    '2023BPix': LEGACY_DATASET,
+    '2024':     V15_DATASET,
+}
+
+# Variant tags to skip when multiple matches exist for a single pt bin.
+# We always prefer the standard reco over JEC/BTV variants.
+_VARIANT_SKIP_TAGS = ('JMENano', 'BTVNano')
 
 
 def query_das_dataset(pattern):
@@ -70,27 +103,38 @@ def query_das_files(dataset):
 
 
 def main():
-    for period, (campaign, _) in CAMPAIGNS.items():
+    parser = argparse.ArgumentParser(
+        description="Generate QCD MuEnriched infiles JSON via DAS.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--periods", nargs="+", choices=list(CAMPAIGNS.keys()),
+        default=list(CAMPAIGNS.keys()),
+        help="Subset of analysis periods to query (default: all).",
+    )
+    args = parser.parse_args()
+
+    for period in args.periods:
+        campaign, _ = CAMPAIGNS[period]
+        ds_template = DATASET_PATTERN_BY_PERIOD[period]
         print(f"\n{'='*60}")
         print(f"Generating QCD_MuEnriched infiles for {period} (campaign {campaign})")
+        print(f"  dataset pattern: {ds_template.format(pt='<bin>', campaign=campaign)}")
         print(f"{'='*60}")
 
         result = {}
 
         for pt_bin in PT_BINS:
             # Build a wildcarded pattern; DAS resolves to the latest version.
-            pattern = (
-                f"/QCD_{pt_bin}_MuEnrichedPt5_TuneCP5_13p6TeV_pythia8"
-                f"/{campaign}-*/NANOAODSIM"
-            )
+            pattern = ds_template.format(pt=pt_bin, campaign=campaign)
             print(f"  Resolving {pt_bin} ...", flush=True)
             datasets = query_das_dataset(pattern)
             if not datasets:
                 print(f"    no dataset matched {pattern}")
                 continue
 
-            # Prefer the standard 130X_mcRun3 over the JMENano12p5 JEC variant.
-            standard = [d for d in datasets if 'JMENano' not in d]
+            # Prefer the standard reco over JEC/BTV variants.
+            standard = [d for d in datasets if not any(t in d for t in _VARIANT_SKIP_TAGS)]
             datasets = standard if standard else datasets
             # If multiple -vN versions remain, take the highest.
             datasets.sort(key=lambda s: s.rsplit('-v', 1)[-1])
