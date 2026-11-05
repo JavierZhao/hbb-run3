@@ -110,6 +110,10 @@ def main(args):
                     "nano_version": args.nano_version,
                     "run_mode": args.run_mode,
                     "BDT": args.BDT,
+                    "git_repo": args.git_repo.removesuffix(".git").rstrip("/"),
+                    "save_regions_arg": (
+                        "--save-regions " + " ".join(args.save_regions) if args.save_regions else ""
+                    ),
                 }
                 write_template(sh_templ, localsh, sh_args)
                 os.system(f"chmod u+x {localsh}")
@@ -152,6 +156,18 @@ def parse_args(parser):
         parser, "submit", default=False, help="submit files as well as create them"
     )
     parser.add_argument("--git-branch", required=True, help="git branch to use", type=str)
+    parser.add_argument(
+        "--git-repo",
+        default="https://github.com/DAZSLE/hbb-run3",
+        help="repository the condor jobs clone --git-branch from (e.g. a personal fork)",
+        type=str,
+    )
+    parser.add_argument(
+        "--save-regions",
+        default=[],
+        nargs="*",
+        help="only save these regions in the skim (default: all regions)",
+    )
     run_utils.add_bool_arg(
         parser,
         "allow-diff-local-repo",

@@ -166,6 +166,7 @@ class categorizer(SkimmerABC):
         evaluate_BDT=True,
         btag_eff=False,
         save_skim_nosysts=False,
+        save_regions=None,
     ):
         super().__init__()
 
@@ -181,6 +182,7 @@ class categorizer(SkimmerABC):
         self._skim_outpath = skim_outpath
         self._evaluate_BDT = evaluate_BDT
         self._btag_eff = btag_eff
+        self._save_regions = list(save_regions) if save_regions else []
         self._btagger, self._btag_wp = "btagPNetB", "M"
         if year == "2024":
             self._btagger = "btagUParTAK4B"
@@ -806,6 +808,14 @@ class categorizer(SkimmerABC):
                 }
             )
 
+        unknown_regions = set(self._save_regions) - set(regions)
+        if unknown_regions:
+            raise ValueError(
+                f"--save-regions {sorted(unknown_regions)} not defined (BDT regions need --BDT); "
+                f"available: {sorted(regions)}"
+            )
+        regions_to_save = [r for r in regions if not self._save_regions or r in self._save_regions]
+
         btag_eff_cuts = [x for x in regions["signal-all"] if x not in ["antiak4btagMedium", "antiak4btagMediumOppHem", "ak4btagMedium08"]]
 
         tic = time.time()
@@ -1073,7 +1083,7 @@ class categorizer(SkimmerABC):
 
         if self._save_skim:
             if shift_name == "nominal":
-                for region in regions:
+                for region in regions_to_save:
                     if region == "signal-all":
                         skim(region, ak.zip({**output_array, **output_array_extra}, depth_limit=1))
                     else:
@@ -1119,7 +1129,7 @@ class categorizer(SkimmerABC):
                                 )
 
             else:  # energy variation shift case
-                for region in regions:
+                for region in regions_to_save:
                     if region != "signal-all":
                         if isRealData:
                             skim(region, ak.zip(energy_var_array, depth_limit=1))

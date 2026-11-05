@@ -93,6 +93,7 @@ def run(year: str, fileset: dict, args: argparse.Namespace):
         skim_outpath="outparquet",
         btag_eff=args.btag_eff,
         save_skim_nosysts=args.save_skim_nosysts,
+        save_regions=args.save_regions,
     )
 
     full_tg, rep = apply_to_fileset(
@@ -236,6 +237,12 @@ if __name__ == "__main__":
         action="store_true",
         help="Evaluate BDT scores and use for categorization",
         default=False,
+    )
+    parser.add_argument(
+        "--save-regions",
+        default=[],
+        nargs="*",
+        help="only save these regions in the skim (default: all regions)",
     )
     group = parser.add_mutually_exclusive_group()
     group.add_argument(

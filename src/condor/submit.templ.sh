@@ -18,7 +18,7 @@ done
 (
     r=3
     # shallow clone of single branch (keep repo size as small as possible)
-    while ! git clone --single-branch --branch $branch --depth=1 https://github.com/DAZSLE/hbb-run3.git
+    while ! git clone --single-branch --branch $branch --depth=1 ${git_repo} hbb-run3
     do
         ((--r)) || exit
         sleep 60
@@ -27,7 +27,7 @@ done
 cd hbb-run3 || exit
 
 commithash=$$(git rev-parse HEAD)
-echo "https://github.com/DAZSLE/hbb-run3/commit/$${commithash}" > commithash.txt
+echo "${git_repo}/commit/$${commithash}" > commithash.txt
 
 pip install -e .
 pip install xgboost
@@ -35,10 +35,10 @@ python3 -m pip install --user "tritonclient[grpc]"
 
 # run code
 if [[ $BDT == True ]]; then
-    python -u -W ignore $script --BDT --year $year --starti $starti --endi $endi --samples $sample --subsamples $subsample --nano-version ${nano_version} --${run_mode}
+    python -u -W ignore $script --BDT --year $year --starti $starti --endi $endi --samples $sample --subsamples $subsample --nano-version ${nano_version} --${run_mode} ${save_regions_arg}
     echo "BDT option enabled!"
 else
-    python -u -W ignore $script --year $year --starti $starti --endi $endi --samples $sample --subsamples $subsample --nano-version ${nano_version} --${run_mode}
+    python -u -W ignore $script --year $year --starti $starti --endi $endi --samples $sample --subsamples $subsample --nano-version ${nano_version} --${run_mode} ${save_regions_arg}
 fi
 # Move final output to EOS
 # This new logic recursively copies the region directories created by the processor
