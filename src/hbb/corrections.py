@@ -10,7 +10,10 @@ from __future__ import annotations
 import pathlib
 from pathlib import Path
 
+import contextlib
+
 import awkward as ak
+import dask_awkward as dak
 import numpy as np
 import correctionlib
 import correctionlib.schemav2
@@ -18,10 +21,11 @@ import pickle
 from coffea.analysis_tools import Weights
 from coffea.nanoevents.methods import vector
 from coffea.nanoevents.methods.nanoaod import JetArray, MuonArray
-from coffea.jetmet_tools import CorrectedJetsFactory, CorrectedMETFactory, CorrectionLibJEC, CorrectionLibJECStack
+from coffea.jetmet_tools import CorrectedJetsFactory, CorrectedMETFactory, JECStack
+from coffea.lookup_tools import extractor
 
 from hbb.MuonScaRe import pt_resol, pt_scale, pt_resol_var, pt_scale_var 
-from hbb.jerc_eras import jec_eras, jer_eras
+from hbb.jerc_eras import jec_eras,jer_eras, jec_mc, jer_mc, jec_data, fatjet_jerc_keys, jet_jerc_keys
 from hbb.taggers import b_taggers
 from hbb.EWHiggs_corrections import theory_xs, xs_ewkcorr, ewh_ptbin
 
@@ -322,56 +326,54 @@ jec_name_map = {
     "JetMass": "mass",
     "JetEta": "eta",
     "JetA": "area",
-    "JetPhi": "phi",
-    "JetChEmEF": "chEmEF",
-    "JetNeEmEF": "neEmEF",
     "ptGenJet": "pt_gen",
     "ptRaw": "pt_raw",
     "massRaw": "mass_raw",
     "Rho": "event_rho",
     "METpt": "pt",
     "METphi": "phi",
-    "RawMETpt": "pt",
-    "RawMETphi": "phi",
+    "JetPhi": "phi",
     "UnClusteredEnergyDeltaX": "MetUnclustEnUpDeltaX",
     "UnClusteredEnergyDeltaY": "MetUnclustEnUpDeltaY",
-    "JetMuonSubtrFactor": "muonSubtrFactor",
-    "JetMuonSubtrDeltaPhi": "muonSubtrDeltaPhi",
-    "CorrT1JetPt": "rawPt",
-    "CorrT1JetPhi": "phi",
-    "CorrT1JetEta": "eta",
-    "CorrT1JetArea": "area",
-    "CorrT1JetMuonSubtrFactor": "muonSubtrFactor",
-    "CorrT1JetMuonSubtrDeltaPhi": "muonSubtrDeltaPhi",
-    "CorrT1JetEmEF": "EmEF",
 }
 
-def apply_jerc(jets, jet_type: str, year: str, isRealData: bool):
+def apply_jerc(jets, jet_type: str, year: str, runkey: str):
     #Create CorrectedJetFactory and apply jercs+variations to JetArray or FatJetArray
-    
+
+    jerc_path =f"{package_path}/hbb/data/jerc"
+    jec_path = f"{jerc_path}/{jec_eras[runkey]}"
+
     if jet_type == "AK8":
-        cfile = get_pog_json("fatjet_jec", year)
+        jet_key = fatjet_jerc_keys[year]
     elif jet_type == "AK4":
-        cfile = get_pog_json("jet_jec", year)
-    
-    jec_stack = CorrectionLibJECStack.from_file(
-        cfile,
-        jec_tag=jec_eras[year],
-        data_type="DATA" if isRealData else "MC",
-        jet_type=f"{jet_type}PFPuppi",
-        jec_level="L1L2L3Res",
-        jer_tag=jer_eras[year],
-    )
-    
+        jet_key = jet_jerc_keys[year]
+
+    #build filelist
+    files = []
+    if "mc" in runkey:
+        jer_path = f"{jerc_path}/{jer_eras[runkey]}"
+        for jec, ps in jec_mc.items():
+            files.append(f"{jec_path}/{jec_eras[runkey]}_{jec}_{jet_key}{ps}")
+        for jer, ps in jer_mc.items():
+            files.append(f"{jer_path}/{jer_eras[runkey]}_{jer}_{jet_key}{ps}")
+    else:
+        for jec, ps in jec_data.items():
+            files.append(f"{jec_path}/{jec_eras[runkey]}_{jec}_{jet_key}{ps}")
+
+    ext = extractor()
+    with contextlib.ExitStack() as stack:
+        real_files = [stack.enter_context(Path(f)) for f in files]
+        ext.add_weight_sets([f"* * {file}" for file in real_files])
+        ext.finalize()
+
+    jec_stack = JECStack(ext.make_evaluator())
     jet_factory = CorrectedJetsFactory(jec_name_map, jec_stack)
 
     corrected_jets = jet_factory.build(jets)
     return corrected_jets
 
-def correct_met(met, jets: JetArray, rawMet, jets_CorrT1: JetArray, event_rho, year: str):
+def correct_met(met, jets: JetArray):
     #Create CorrectedMETFactory and recluster met
-    
-    cset = correctionlib.CorrectionSet.from_file(get_pog_json("jet_jec", year))
 
     dX_up = met.ptUnclusteredUp * np.cos(met.phiUnclusteredUp)
     dY_up = met.ptUnclusteredUp * np.sin(met.phiUnclusteredUp)
@@ -379,15 +381,9 @@ def correct_met(met, jets: JetArray, rawMet, jets_CorrT1: JetArray, event_rho, y
     dY_nom = met.pt * np.sin(met.phi)
     met["MetUnclustEnUpDeltaX"] = dX_up - dX_nom
     met["MetUnclustEnUpDeltaY"] = dY_up - dY_nom
-    
-    jets_CorrT1["event_rho"] = ak.broadcast_arrays(event_rho, jets_CorrT1.pt)[0]
-    
-    #Only AK4 correctors for MET recalculation
-    jec_L1 = CorrectionLibJEC(cset[f"{jec_eras[year]}_L1FastJet_AK4PFPUPPI"])
-    jec_L1L2L3 = CorrectionLibJEC(cset.compound[f"{jec_eras[year]}_L1L2L3Res_AK4PFPUPPI"])
-    
-    met_factory = CorrectedMETFactory(jec_name_map, jec_L1=jec_L1, jec_L1L2L3=jec_L1L2L3)
-    corrected_met = met_factory.build(met, jets, rawMet, jets_CorrT1)
+
+    met_factory = CorrectedMETFactory(jec_name_map)
+    corrected_met = met_factory.build(met, jets)
 
     return corrected_met
 
