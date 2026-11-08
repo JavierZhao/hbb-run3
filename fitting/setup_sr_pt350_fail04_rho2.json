@@ -1,0 +1,367 @@
+{
+    "root_filename": "fitting_{year}_msd.root",
+    "data_obs_name": "Jetdata",
+    "qcd_proc": "QCD",
+    "pt_min_scale": 350.0,
+    "regions_to_fit": [
+        "bb",
+        "cc"
+    ],
+    "do_BDT_regions": true,
+    "rho_scaling_max": -2.0,
+    "do_systematics": true,
+    "do_muon_CR": true,
+    "active_systematics": [
+        "pileup",
+        "JES",
+        "JER",
+        "UES",
+        "ISRPartonShower",
+        "FSRPartonShower",
+        "btagSFb",
+        "btagSFc",
+        "btagSFlight",
+        "btagSFb_correlated",
+        "btagSFc_correlated",
+        "btagSFlight_correlated",
+        "pdf_Higgs",
+        "QCDScale",
+        "VJets"
+    ],
+    "samples_qq": [
+        "Wjets",
+        "Zjets",
+        "EWKW",
+        "EWKZ",
+        "EWKV"
+    ],
+    "observable": {
+        "name": "ParTMassGeneric",
+        "branch_name": "FatJet0_ParTmassGeneric",
+        "qcdrho": "FatJet0_ParTmassGeneric_rho",
+        "min": 59,
+        "max": 220,
+        "nbins": 23
+    },
+    "categories": {
+        "ggf": {
+            "bins": [
+                350,
+                450,
+                1200
+            ],
+            "tfmc_order": {
+                "bb": {
+                    "pt": 0,
+                    "rho": 2
+                },
+                "cc": {
+                    "pt": 0,
+                    "rho": 2
+                }
+            },
+            "tfres_order": {
+                "bb": {
+                    "pt": 0,
+                    "rho": 0
+                },
+                "cc": {
+                    "pt": 0,
+                    "rho": 0
+                }
+            }
+        },
+        "vbf": {
+            "bins": [
+                1000,
+                13000
+            ],
+            "bins_pt": [
+                350,
+                450,
+                1200
+            ],
+            "bin_branch": "VBFPair_mjj",
+            "bin_prefix": "mjj",
+            "tfmc_order": {
+                "bb": {
+                    "pt": 0,
+                    "rho": 2
+                },
+                "cc": {
+                    "pt": 0,
+                    "rho": 2
+                }
+            },
+            "tfres_order": {
+                "bb": {
+                    "pt": 0,
+                    "rho": 0
+                },
+                "cc": {
+                    "pt": 0,
+                    "rho": 0
+                }
+            }
+        },
+        "vh": {
+            "bins": [
+                350,
+                450,
+                1200
+            ],
+            "tfmc_order": {
+                "bb": {
+                    "pt": 0,
+                    "rho": 2
+                },
+                "cc": {
+                    "pt": 0,
+                    "rho": 2
+                }
+            },
+            "tfres_order": {
+                "bb": {
+                    "pt": 0,
+                    "rho": 0
+                },
+                "cc": {
+                    "pt": 0,
+                    "rho": 0
+                }
+            }
+        },
+        "mucr": {
+            "bins": [
+                350,
+                450,
+                1200
+            ]
+        }
+    },
+    "process_groups": {
+        "ggF_hbb": {
+            "components": [
+                [
+                    "ggFbb",
+                    ""
+                ]
+            ],
+            "is_signal": true
+        },
+        "VBF_hbb": {
+            "components": [
+                [
+                    "VBFbb",
+                    ""
+                ]
+            ],
+            "is_signal": true
+        },
+        "WH_hbb": {
+            "components": [
+                [
+                    "WHbb",
+                    ""
+                ]
+            ],
+            "is_signal": true
+        },
+        "ZH_hbb": {
+            "components": [
+                [
+                    "ZHbb",
+                    ""
+                ]
+            ],
+            "is_signal": true
+        },
+        "ggF_hcc": {
+            "components": [
+                [
+                    "ggFcc",
+                    ""
+                ]
+            ],
+            "is_signal": true
+        },
+        "VBF_hcc": {
+            "components": [
+                [
+                    "VBFcc",
+                    ""
+                ]
+            ],
+            "is_signal": true
+        },
+        "WH_hcc": {
+            "components": [
+                [
+                    "WHcc",
+                    ""
+                ]
+            ],
+            "is_signal": true
+        },
+        "ZH_hcc": {
+            "components": [
+                [
+                    "ZHcc",
+                    ""
+                ]
+            ],
+            "is_signal": true
+        },
+        "ttH": {
+            "components": [
+                [
+                    "ttH",
+                    ""
+                ]
+            ],
+            "is_signal": false
+        },
+        "ttbar": {
+            "components": [
+                [
+                    "ttbar",
+                    ""
+                ]
+            ],
+            "is_signal": false
+        },
+        "singlet": {
+            "components": [
+                [
+                    "singlet",
+                    ""
+                ]
+            ],
+            "is_signal": false
+        },
+        "VV": {
+            "components": [
+                [
+                    "VV",
+                    ""
+                ]
+            ],
+            "is_signal": false
+        },
+        "Wjets": {
+            "components": [
+                [
+                    "Wjets",
+                    "c"
+                ],
+                [
+                    "Wjets",
+                    "light"
+                ]
+            ],
+            "is_signal": false
+        },
+        "EWKW": {
+            "components": [
+                [
+                    "EWKW",
+                    "c"
+                ],
+                [
+                    "EWKW",
+                    "light"
+                ]
+            ],
+            "is_signal": false
+        },
+        "Zjetsbb": {
+            "components": [
+                [
+                    "Zjets",
+                    "bb"
+                ]
+            ],
+            "is_signal": false
+        },
+        "Zjetsc": {
+            "components": [
+                [
+                    "Zjets",
+                    "c"
+                ]
+            ],
+            "is_signal": false
+        },
+        "Zjetslight": {
+            "components": [
+                [
+                    "Zjets",
+                    "light"
+                ]
+            ],
+            "is_signal": false
+        },
+        "EWKZbb": {
+            "components": [
+                [
+                    "EWKZ",
+                    "bb"
+                ]
+            ],
+            "is_signal": false
+        },
+        "EWKZc": {
+            "components": [
+                [
+                    "EWKZ",
+                    "c"
+                ]
+            ],
+            "is_signal": false
+        },
+        "EWKZlight": {
+            "components": [
+                [
+                    "EWKZ",
+                    "light"
+                ]
+            ],
+            "is_signal": false
+        }
+    },
+    "physics_model": {
+        "main": {
+            "model": "HiggsAnalysis.CombinedLimit.PhysicsModel:multiSignalModel",
+            "maps": [
+                "map=.*/ggF_hbb:rggF_bb[1,-20,20]",
+                "map=.*/VBF_hbb:rVBF_bb[1,-20,20]",
+                "map=.*/WH_hbb:rVH_bb[1,-20,20]",
+                "map=.*/ZH_hbb:rVH_bb[1,-20,20]",
+                "map=.*/ggF_hcc:rggF_cc[1,-20,20]",
+                "map=.*/VBF_hcc:rVBF_cc[1,-20,20]",
+                "map=.*/WH_hcc:rVH_cc[1,-20,20]",
+                "map=.*/ZH_hcc:rVH_cc[1,-20,20]"
+            ]
+        },
+        "couplingmodel": {
+            "model": "hbb.KappaBC:KBC",
+            "alt_pnames": {
+                "ggF_hbb": "ggH_hbb",
+                "VBF_hbb": "qqH_hbb",
+                "ggF_hcc": "ggH_hcc",
+                "VBF_hcc": "qqH_hcc"
+            },
+            "maps": [
+                "modes=ggH,qqH,VH",
+                "allowNegativeCouplings"
+            ],
+            "t2w_extra": "-m 125",
+            "build_preamble": [
+                "export CMSSW_BASE='/cvmfs/unpacked.cern.ch/gitlab-registry.cern.ch/cms-analysis/general/combine-container:latest/home/cmsusr/CMSSW_16_0_0'",
+                "export COMBINE_SRC='/cvmfs/unpacked.cern.ch/gitlab-registry.cern.ch/cms-analysis/general/combine-container:latest/home/cmsusr/CMSSW_16_0_0/src/HiggsAnalysis/CombinedLimit'"
+            ]
+        }
+    },
+    "fail_min": 0.4,
+    "rho_cut": -2.0
+}

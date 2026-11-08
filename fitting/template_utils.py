@@ -270,6 +270,11 @@ def fill_binned_histogram(
         # --- SELECTION LOGIC ---
         basic_cuts = (var_series > obs["min"]) & (var_series < obs["max"])
 
+        # Optional per-event rho cut on the observable's rho (setup "rho_cut", e.g. -2.0)
+        rho_cut = setup.get("rho_cut")
+        if rho_cut is not None:
+            basic_cuts = basic_cuts & (data[obs["qcdrho"]] < rho_cut)
+
         pre_selection = basic_cuts & (pt > pt_min)  #signal categories
         if "zgcr" in region_key:
             # Specific Z-Gamma logic from Gabi's script
@@ -298,7 +303,8 @@ def fill_binned_histogram(
             selection_dict = {
                 "pass_bb": pre_selection & (Txbbxcc > working_point) & (Txbb > Txcc),
                 "pass_cc": pre_selection & (Txbbxcc > working_point) & (Txcc > Txbb),
-                "fail": pre_selection & (Txbbxcc <= working_point),
+                # Optional lower bound on the fail region (setup "fail_min", e.g. 0.4)
+                "fail": pre_selection & (Txbbxcc <= working_point) & (Txbbxcc > setup.get("fail_min", -1.0)),
                 "pass": pre_selection & (Txbbxcc > working_point),
                 "inclusive": pre_selection,
             }

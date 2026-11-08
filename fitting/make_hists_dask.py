@@ -129,6 +129,10 @@ def main(args):
         if obs_branch not in cols:
             cols.append(obs_branch)
 
+        # Optional per-event rho cut (setup "rho_cut") needs the rho column
+        if setup.get("rho_cut") is not None and setup["observable"]["qcdrho"] not in cols:
+            cols.append(setup["observable"]["qcdrho"])
+
         # ------------------------------------------------------------------
         # Build loose PyArrow row filters from the setup config.
         # These are applied at read time (predicate pushdown) — rows that
@@ -140,7 +144,7 @@ def main(args):
         pq_filters = [
             ("FatJet0_msd", ">=", float(setup["observable"]["min"])),
             ("FatJet0_msd", "<=", float(setup["observable"]["max"])),
-            ("FatJet0_pt",  ">=", float(450.)),
+            ("FatJet0_pt",  ">=", float(setup.get("pt_min_scale", 450.0))),
             ("FatJet0_pt",  "<=", float(1200.)),
         ]
 
