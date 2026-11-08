@@ -32,7 +32,7 @@ from hbb.corrections import (
     mupt_variations,
     egm_variations
 )
-from hbb.jerc_eras import jerc_variations
+from hbb.jerc_eras import jerc_variations, run_map
 from hbb.processors.SkimmerABC import SkimmerABC
 from hbb.taggers import b_taggers
 
@@ -407,6 +407,14 @@ class categorizer(SkimmerABC):
         selection.add("metfilter", metfilter)
         del metfilter
 
+        mc_run = "mc"
+        if isRealData:
+            for keys, value in run_map.items():
+                if any(k in dataset for k in keys):
+                    mc_run = value
+                    break
+        jec_key = f"{self._year}_{mc_run}"
+
         fatjets = set_ak8jets(
             events.FatJet, isRealData, self._year, self._nano_version, events.Rho.fixedGridRhoFastjetAll
         )
@@ -433,9 +441,9 @@ class categorizer(SkimmerABC):
         met = events.PuppiMET
         # Apply jerc corrections to jets, fatjets, and met collections
         if not self._skip_syst:
-            jets = apply_jerc(jets, "AK4", self._year, isRealData)
-            fatjets = apply_jerc(fatjets, "AK8", self._year, isRealData)
-            met = correct_met(met, jets, events.RawPuppiMET, events.CorrT1METJet, events.Rho.fixedGridRhoFastjetAll, self._year)  # PuppiMET Recommended for Run3
+            jets = apply_jerc(jets, "AK4", self._year, jec_key)
+            fatjets = apply_jerc(fatjets, "AK8", self._year, jec_key)
+            met = correct_met(met, jets)  # PuppiMET Recommended for Run3
 
         # Select jets, fatjets, and met collections according to jerc variation shift
         if shift_name != "nominal" and not any(obj in shift_name for obj in ["Muon", "Electron", "Photon"]):
