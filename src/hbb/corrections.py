@@ -16,6 +16,7 @@ import awkward as ak
 import dask_awkward as dak
 import numpy as np
 import correctionlib
+from scipy.special import erfinv
 import correctionlib.schemav2
 import pickle
 from coffea.analysis_tools import Weights
@@ -592,11 +593,29 @@ egm_variations = {
     "PhotonPTRes": "ptcorr_smear"
 }
 
+def _det_gauss(run, pt, eta, phi):
+    """Deterministic per-object N(0,1) numbers from object kinematics, dask-awkward
+    compatible (same hashing idea as MuonScaRe.get_rndm)."""
+
+    def bits(x, scale):
+        x64 = ak.values_astype(ak.values_astype(x, np.float64) * scale, np.int64)
+        return ak.values_astype(x64 & 0xFFFFFFFF, np.uint64)
+
+    h = ak.values_astype(run, np.uint64) * np.uint64(0xC6A4A7935BD1E995)
+    h = h ^ (bits(pt, 1e4) * np.uint64(0x9E3779B97F4A7C15))
+    h = h ^ (bits(eta, 1e6) * np.uint64(0x517CC1B727220A95))
+    h = h ^ (bits(phi, 1e6) * np.uint64(0xBF58476D1CE4E5B9))
+    h = (h ^ (h >> np.uint64(30))) * np.uint64(0x94D049BB133111EB)
+    h = (h ^ (h >> np.uint64(31))) & np.uint64(0xFFFFFFFF)
+    u = (ak.values_astype(h, np.float64) + 0.5) / np.float64(2**32)
+    return np.sqrt(2.0) * erfinv(2.0 * u - 1.0)
+
+
 def correct_egm_obj(egm_obj_array, egm_obj_type: str, year: str, isRealData: bool, nano_version: str, event_run):
     
     cset = correctionlib.CorrectionSet.from_file(get_pog_json(f"{egm_obj_type}SS", year))
     scale_ev = cset.compound["Scale"]
-    smear_and_syst_ev = cset.compound["SmearAndSyst"]
+    smear_and_syst_ev = cset["SmearAndSyst"]  # plain correction, not a compound
     
     egm_obj_array["event_run"] = ak.broadcast_arrays(event_run, egm_obj_array.pt)[0]
     if "v15" in nano_version:
@@ -614,28 +633,31 @@ def correct_egm_obj(egm_obj_array, egm_obj_type: str, year: str, isRealData: boo
         return ak.unflatten(sf, ne)
     
     if isRealData:
-        scale_flat = scale_ev.avaluate("scale", e_flat.event_run, e_flat.sc_eta, e_flat.r9, e_flat.pt, e_flat.seedGain)
+        scale_flat = scale_ev.evaluate("scale", e_flat.event_run, e_flat.sc_eta, e_flat.r9, e_flat.pt, e_flat.seedGain)
         scale = ak.unflatten(scale_flat, ne)
         
         egm_obj_array["ptcorr"] = egm_obj_array.pt * scale
         
     else:
-        rng = np.random.default_rng(seed=125)
-        random_numbers = rng.normal(loc=0.0, scale=1.0, size=len(egm_obj_array.pt))
-        
+        # one N(0,1) number per object (not per event); deterministic hash so it
+        # works on lazy dask-awkward arrays (len() is unknown before compute)
+        random_numbers = ak.unflatten(
+            _det_gauss(e_flat.event_run, e_flat.pt, e_flat.eta, e_flat.phi), ne
+        )
+
         smearing = 1. + random_numbers * get_ss_sf("smear")
         smearing_up = 1. + random_numbers * get_ss_sf("smear_up")
         smearing_dn = 1. + random_numbers * get_ss_sf("smear_down")
-        smearing_scale_up = 1. + random_numbers * get_ss_sf("scale_up")
-        smearing_scale_dn = 1. + random_numbers * get_ss_sf("scale_down")
-        
+
         egm_obj_array["ptcorr"] = egm_obj_array.pt * smearing
-        
+
         egm_obj_array["ptcorr_smear_up"] = egm_obj_array.pt * smearing_up
-        egm_obj_array["ptcorr_smear_dn"] = egm_obj_array.pt * smearing_dn
-        
-        egm_obj_array["ptcorr_scale_up"] = egm_obj_array.pt * smearing_scale_up
-        egm_obj_array["ptcorr_scale_dn"] = egm_obj_array.pt * smearing_scale_dn
+        # "_down" (not "_dn"): categorizer reads f"{egm_variations[var]}_{direction.lower()}"
+        egm_obj_array["ptcorr_smear_down"] = egm_obj_array.pt * smearing_dn
+
+        # scale_up/scale_down are multiplicative factors (~1 +- 6e-4), not smearing widths
+        egm_obj_array["ptcorr_scale_up"] = egm_obj_array.ptcorr * get_ss_sf("scale_up")
+        egm_obj_array["ptcorr_scale_down"] = egm_obj_array.ptcorr * get_ss_sf("scale_down")
         
     return egm_obj_array
 

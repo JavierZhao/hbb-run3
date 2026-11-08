@@ -457,7 +457,7 @@ class categorizer(SkimmerABC):
                 met = getattr(getattr(met, attr), direction.lower())
 
         goodfatjets = good_ak8jets(fatjets)
-        goodjets = good_ak4jets(jets)
+        goodjets = good_ak4jets(jets, self._year)
         
         bc_jets = jets[
             (jets.pt > 50)
@@ -585,7 +585,7 @@ class categorizer(SkimmerABC):
         ak8_outside_dimuon = goodfatjets[(dR_leadm > 0.8) & (dR_subleadm > 0.8)]
         nak8_zmm = ak.num(ak8_outside_dimuon, axis=1)
 
-        electrons = correct_egm_obj(events.Electron, "electron", self._year, isRealData, events.run)
+        electrons = correct_egm_obj(events.Electron, "electron", self._year, isRealData, self._nano_version, events.run)
         if shift_name != "nominal" and "Electron" in shift_name:
             var, direction = shift_name.split("_")
             self._elept_type = f"{egm_variations[var]}_{direction.lower()}"
@@ -609,7 +609,7 @@ class categorizer(SkimmerABC):
         )
         selection.add("muonDphiAK8", abs(ttbarmuon.delta_phi(candidatejet)) > 2 * np.pi / 3)
 
-        photons = correct_egm_obj(events.Photon, "photon", self._year, isRealData, events.run)
+        photons = correct_egm_obj(events.Photon, "photon", self._year, isRealData, self._nano_version, events.run)
         if shift_name != "nominal" and "Photon" in shift_name:
             var, direction = shift_name.split("_")
             self._phopt_type = f"{egm_variations[var]}_{direction.lower()}"
