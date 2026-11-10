@@ -20,6 +20,9 @@ from lpcjobqueue import LPCCondorCluster
 
 from template_utils import (
     REGION_MAP,
+    cat_pt_range,
+    cat_region,
+    cat_value,
     folder_systs,
     year_systs,
     get_pdf_list,
@@ -130,7 +133,7 @@ def main(args):
             cols.append(obs_branch)
 
         # Optional per-event rho cut (setup "rho_cut") needs the rho column
-        if setup.get("rho_cut") is not None and setup["observable"]["qcdrho"] not in cols:
+        if cat_value(setup, region_key, "rho_cut") is not None and setup["observable"]["qcdrho"] not in cols:
             cols.append(setup["observable"]["qcdrho"])
 
         # ------------------------------------------------------------------
@@ -144,8 +147,8 @@ def main(args):
         pq_filters = [
             ("FatJet0_msd", ">=", float(setup["observable"]["min"])),
             ("FatJet0_msd", "<=", float(setup["observable"]["max"])),
-            ("FatJet0_pt",  ">=", float(setup.get("pt_min_scale", 450.0))),
-            ("FatJet0_pt",  "<=", float(1200.)),
+            ("FatJet0_pt",  ">=", cat_pt_range(setup, region_key)[0]),
+            ("FatJet0_pt",  "<=", cat_pt_range(setup, region_key)[1]),
         ]
 
         # Determine Data Stream (e.g., EGammadata for zgamma)
@@ -221,7 +224,7 @@ def main(args):
                     data_dir = Path(args.data_dir) if args.data_dir else Path(
                         f"/eos/uscms/store/group/lpchbbrun3/skims/{args.tag}/{args.year}"
                     )
-                    region = REGION_MAP[region_key] if not do_BDT_regions or "cr" in region_key else f"{REGION_MAP[region_key]}-BDT"
+                    region = cat_region(setup, region_key) if not do_BDT_regions or "cr" in region_key else f"{cat_region(setup, region_key)}-BDT"
                     search_path = Path(data_dir / dataset /  "parquet" / variation / region)
 
                     if not eos_exists(str(search_path).replace("/eos/uscms", "")):

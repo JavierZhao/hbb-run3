@@ -2,7 +2,7 @@
     "root_filename": "fitting_{year}_msd.root",
     "data_obs_name": "Jetdata",
     "qcd_proc": "QCD",
-    "pt_min_scale": 350.0,
+    "pt_min_scale": 450.0,
     "regions_to_fit": [
         "bb",
         "cc"
@@ -46,7 +46,6 @@
     "categories": {
         "ggf": {
             "bins": [
-                350,
                 450,
                 1200
             ],
@@ -69,7 +68,8 @@
                     "pt": 0,
                     "rho": 0
                 }
-            }
+            },
+            "fail_min": 0.4
         },
         "vbf": {
             "bins": [
@@ -77,7 +77,6 @@
                 13000
             ],
             "bins_pt": [
-                350,
                 450,
                 1200
             ],
@@ -102,11 +101,11 @@
                     "pt": 0,
                     "rho": 0
                 }
-            }
+            },
+            "fail_min": 0.4
         },
         "vh": {
             "bins": [
-                350,
                 450,
                 1200
             ],
@@ -129,14 +128,116 @@
                     "pt": 0,
                     "rho": 0
                 }
-            }
+            },
+            "fail_min": 0.4
         },
         "mucr": {
             "bins": [
-                350,
                 450,
                 1200
             ]
+        },
+        "ggf350": {
+            "bins": [
+                350,
+                450
+            ],
+            "tfmc_order": {
+                "bb": {
+                    "pt": 0,
+                    "rho": 2
+                },
+                "cc": {
+                    "pt": 0,
+                    "rho": 2
+                }
+            },
+            "tfres_order": {
+                "bb": {
+                    "pt": 0,
+                    "rho": 0
+                },
+                "cc": {
+                    "pt": 0,
+                    "rho": 0
+                }
+            },
+            "region": "signal-ggf",
+            "pt_min": 350.0,
+            "pt_max": 450.0,
+            "rho_cut": -2.0,
+            "rho_scaling_max": -2.0,
+            "fail_min": 0.4
+        },
+        "vh350": {
+            "bins": [
+                350,
+                450
+            ],
+            "tfmc_order": {
+                "bb": {
+                    "pt": 0,
+                    "rho": 2
+                },
+                "cc": {
+                    "pt": 0,
+                    "rho": 2
+                }
+            },
+            "tfres_order": {
+                "bb": {
+                    "pt": 0,
+                    "rho": 0
+                },
+                "cc": {
+                    "pt": 0,
+                    "rho": 0
+                }
+            },
+            "region": "signal-vh",
+            "pt_min": 350.0,
+            "pt_max": 450.0,
+            "rho_cut": -2.0,
+            "rho_scaling_max": -2.0,
+            "fail_min": 0.4
+        },
+        "vbf350": {
+            "bins": [
+                1000,
+                13000
+            ],
+            "bins_pt": [
+                350,
+                450
+            ],
+            "bin_branch": "VBFPair_mjj",
+            "bin_prefix": "mjj",
+            "tfmc_order": {
+                "bb": {
+                    "pt": 0,
+                    "rho": 2
+                },
+                "cc": {
+                    "pt": 0,
+                    "rho": 2
+                }
+            },
+            "tfres_order": {
+                "bb": {
+                    "pt": 0,
+                    "rho": 0
+                },
+                "cc": {
+                    "pt": 0,
+                    "rho": 0
+                }
+            },
+            "region": "signal-vbf",
+            "pt_min": 350.0,
+            "pt_max": 450.0,
+            "rho_cut": -2.0,
+            "rho_scaling_max": -2.0,
+            "fail_min": 0.4
         }
     },
     "process_groups": {
@@ -361,6 +462,5 @@
                 "export COMBINE_SRC='/cvmfs/unpacked.cern.ch/gitlab-registry.cern.ch/cms-analysis/general/combine-container:latest/home/cmsusr/CMSSW_16_0_0/src/HiggsAnalysis/CombinedLimit'"
             ]
         }
-    },
-    "fail_min": 0.4
+    }
 }

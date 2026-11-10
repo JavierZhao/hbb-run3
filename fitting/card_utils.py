@@ -149,7 +149,7 @@ def one_bin(filename, sName, region, ptbin, cat, syst):
     return (np.array([integral]), np.array([0.0, 1.0]), "onebin", np.array([error2]))
 
 
-def plot_mctf(tf_MCtempl, msdbins, name, _year, _tag, out_dir_base, pt_min=450.0, rho_max=-2.1):
+def plot_mctf(tf_MCtempl, msdbins, name, _year, _tag, out_dir_base, pt_min=450.0, rho_max=-2.1, pt_max=1200.0):
     import matplotlib.pyplot as plt
     import pandas as pd  # Ensure pandas is imported
 
@@ -158,13 +158,13 @@ def plot_mctf(tf_MCtempl, msdbins, name, _year, _tag, out_dir_base, pt_min=450.0
     outdir.mkdir(parents=True, exist_ok=True)
 
     # 1. Create Grid
-    pts = np.linspace(pt_min, 1200, 15)
+    pts = np.linspace(pt_min, pt_max, 15)
     ptpts, msdpts = np.meshgrid(
         pts[:-1] + 0.5 * np.diff(pts), msdbins[:-1] + 0.5 * np.diff(msdbins), indexing="ij"
     )
 
     # 2. Scale Coordinates
-    ptpts_scaled = (ptpts - pt_min) / (1200.0 - pt_min)
+    ptpts_scaled = (ptpts - pt_min) / (pt_max - pt_min)
     rhopts = 2 * np.log(msdpts / ptpts)
     rhopts_scaled = (rhopts - (-6)) / (rho_max - (-6))
 

@@ -26,6 +26,25 @@ REGION_MAP = {
     "ggf": "signal-ggf",
 }
 
+def cat_value(setup, region_key, key, default=None):
+    """Category-level setting, falling back to the top-level setup value."""
+    reg_cfg = setup["categories"].get(region_key, {})
+    return reg_cfg.get(key, setup.get(key, default))
+
+
+def cat_pt_range(setup, region_key):
+    """(pt_min, pt_max) of a category: "pt_min"/"pt_max" keys, else pt_min_scale / 1200."""
+    return (
+        float(cat_value(setup, region_key, "pt_min", setup.get("pt_min_scale", 450.0))),
+        float(cat_value(setup, region_key, "pt_max", 1200.0)),
+    )
+
+
+def cat_region(setup, region_key):
+    """Skim region a category reads: "region" key (e.g. ggf350 -> signal-ggf), else REGION_MAP."""
+    return setup["categories"][region_key].get("region", REGION_MAP.get(region_key))
+
+
 #systematics special groupings
 folder_systs = ["JES", "JER", "UES", "MuonPTScale", "MuonPTRes"]
 analysis_systs = ["pdf_Higgs", "scalevar7pt", "scalevar3pt"]
@@ -248,7 +267,7 @@ def fill_binned_histogram(
         Txbb = data["FatJet0_ParTPXbbVsQCD"]
         Txbbxcc = data["FatJet0_ParTPXbbXcc"]
 
-        pt_min = setup.get("pt_min_scale", 450.0)
+        pt_min, pt_max = cat_pt_range(setup, region_key)
         working_point = setup.get("working_point", 0.82)
 
         # Robust MET extraction from the parquet record
@@ -271,11 +290,11 @@ def fill_binned_histogram(
         basic_cuts = (var_series > obs["min"]) & (var_series < obs["max"])
 
         # Optional per-event rho cut on the observable's rho (setup "rho_cut", e.g. -2.0)
-        rho_cut = setup.get("rho_cut")
+        rho_cut = cat_value(setup, region_key, "rho_cut")
         if rho_cut is not None:
             basic_cuts = basic_cuts & (data[obs["qcdrho"]] < rho_cut)
 
-        pre_selection = basic_cuts & (pt > pt_min)  #signal categories
+        pre_selection = basic_cuts & (pt > pt_min) & (pt < pt_max)  #signal categories
         if "zgcr" in region_key:
             # Specific Z-Gamma logic from Gabi's script
             trigger = data["Photon200"] | data["Photon110EB_TightID_TightIso"]
@@ -304,7 +323,7 @@ def fill_binned_histogram(
                 "pass_bb": pre_selection & (Txbbxcc > working_point) & (Txbb > Txcc),
                 "pass_cc": pre_selection & (Txbbxcc > working_point) & (Txcc > Txbb),
                 # Optional lower bound on the fail region (setup "fail_min", e.g. 0.4)
-                "fail": pre_selection & (Txbbxcc <= working_point) & (Txbbxcc > setup.get("fail_min", -1.0)),
+                "fail": pre_selection & (Txbbxcc <= working_point) & (Txbbxcc > cat_value(setup, region_key, "fail_min", -1.0)),
                 "pass": pre_selection & (Txbbxcc > working_point),
                 "inclusive": pre_selection,
             }

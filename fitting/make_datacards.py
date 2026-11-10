@@ -197,8 +197,13 @@ def rhalphabet(args):
             indexing="ij",
         )
         rhopts = 2 * np.log(msdpts / ptpts)
-        ptscaled = (ptpts - pt_min_scale) / (1200.0 - pt_min_scale)
-        rhoscaled = (rhopts - (-6.0)) / (rho_scaling_max - (-6.0))
+        # per-category pT range and rho max ("pt_min"/"pt_max"/"rho_scaling_max"), else global
+        cat_cfg = cats_cfg[cat]
+        cat_pt_min = float(cat_cfg.get("pt_min", pt_min_scale))
+        cat_pt_max = float(cat_cfg.get("pt_max", 1200.0))
+        cat_rho_max = float(cat_cfg.get("rho_scaling_max", rho_scaling_max))
+        ptscaled = (ptpts - cat_pt_min) / (cat_pt_max - cat_pt_min)
+        rhoscaled = (rhopts - (-6.0)) / (cat_rho_max - (-6.0))
 
         validbins[cat] = (rhoscaled >= 0.0) & (rhoscaled <= 1.0)
         rhoscaled[~validbins[cat]] = 1
@@ -338,8 +343,9 @@ def rhalphabet(args):
                 year,
                 tag,
                 str(working_dir),
-                pt_min=pt_min_scale,  # <--- Pass from config
-                rho_max=rho_scaling_max,  # <--- Pass from config (-1.0 for ZG)
+                pt_min=cat_pt_min,  # <--- Pass from config
+                rho_max=cat_rho_max,  # <--- Pass from config (-1.0 for ZG)
+                pt_max=cat_pt_max,
             )
 
             param_names = [p.name for p in tf_MCtempl.parameters.reshape(-1)]
