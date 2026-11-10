@@ -36,9 +36,11 @@ python3 -m pip install --user "tritonclient[grpc]"
 # run code
 if [[ $BDT == True ]]; then
     python -u -W ignore $script --BDT --year $year --starti $starti --endi $endi --samples $sample --subsamples $subsample --nano-version ${nano_version} --${run_mode} ${save_regions_arg}
+    pyrc=$$?
     echo "BDT option enabled!"
 else
     python -u -W ignore $script --year $year --starti $starti --endi $endi --samples $sample --subsamples $subsample --nano-version ${nano_version} --${run_mode} ${save_regions_arg}
+    pyrc=$$?
 fi
 # Move final output to EOS
 # This new logic recursively copies the region directories created by the processor
@@ -75,3 +77,7 @@ done
 rm *.parquet
 rm *.pkl
 rm commithash.txt
+
+# report the processor exit code to condor (was always 0)
+echo "python exit code: $${pyrc}"
+exit $${pyrc}

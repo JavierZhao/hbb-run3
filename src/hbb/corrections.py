@@ -24,6 +24,29 @@ from coffea.nanoevents.methods import vector
 from coffea.nanoevents.methods.nanoaod import JetArray, MuonArray
 from coffea.jetmet_tools import CorrectedJetsFactory, CorrectedMETFactory, JECStack
 from coffea.lookup_tools import extractor
+import importlib
+
+_cjf = importlib.import_module("coffea.jetmet_tools.CorrectedJetsFactory")  # the module, not the class
+
+# coffea's JER rand_gauss seeds its RNG from item[[0, -1]], which raises IndexError on a
+# partition with zero jets (e.g. a short last chunk of a low-HT file). Return an empty
+# array of the right structure in that case; non-empty partitions are unchanged.
+_coffea_rand_gauss = _cjf.rand_gauss
+
+
+def _rand_gauss_safe(item):
+    if ak.backend(item) != "typetracer" and len(ak.flatten(item, axis=None)) == 0:
+        return ak.transform(
+            lambda layout, **kw: ak.contents.NumpyArray(np.zeros(len(layout), np.float32))
+            if isinstance(layout, ak.contents.NumpyArray)
+            else None,
+            item,
+            behavior=item.behavior,
+        )
+    return _coffea_rand_gauss(item)
+
+
+_cjf.rand_gauss = _rand_gauss_safe
 
 from hbb.MuonScaRe import pt_resol, pt_scale, pt_resol_var, pt_scale_var 
 from hbb.jerc_eras import jec_eras,jer_eras, jec_mc, jer_mc, jec_data, fatjet_jerc_keys, jet_jerc_keys
